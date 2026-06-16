@@ -58,25 +58,39 @@ class MainWindow(QMainWindow):
         main_layout = QHBoxLayout(main_widget)
         main_layout.setContentsMargins(15, 15, 15, 15)
 
-        # ---------- 左：预览 ----------
+        # ---------- 左：预览 + 波形 + 日志 ----------
         self.left_panel = QWidget()
         left_layout = QVBoxLayout(self.left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
-        self.preview_label = QLabel("视频预览区\n(处理过程中实时显示)")
-        self.preview_label.setAlignment(Qt.AlignCenter)
-        self.preview_label.setStyleSheet(
-            "background-color: #1C1C1E; color: #E5E5EA; border-radius: 12px; font-size: 15px;"
-        )
-        left_layout.addWidget(self.preview_label)
+        left_layout.setSpacing(8)
 
-        # 波形可视化
-        self.waveform_label = QLabel("音频波形 (选择视频后自动生成)")
-        self.waveform_label.setAlignment(Qt.AlignCenter)
-        self.waveform_label.setFixedHeight(80)
-        self.waveform_label.setStyleSheet(
-            "background-color: #2C2C2E; color: #86868B; border-radius: 8px; font-size: 12px;"
+        self.preview_label = QLabel("🎬 视频预览")
+        self.preview_label.setAlignment(Qt.AlignCenter)
+        self.preview_label.setMinimumHeight(120)
+        self.preview_label.setStyleSheet(
+            "background-color: #0D0D20; color: #5A5A9A; border: 1px solid #2A2A55;"
+            " border-radius: 10px; font-size: 14px;"
         )
-        left_layout.addWidget(self.waveform_label)
+        left_layout.addWidget(self.preview_label, 2)
+
+        # 波形可视化（缩小高度）
+        self.waveform_label = QLabel("🎵 音频波形 (选择视频后自动生成)")
+        self.waveform_label.setAlignment(Qt.AlignCenter)
+        self.waveform_label.setFixedHeight(54)
+        self.waveform_label.setStyleSheet(
+            "background-color: #0D0D20; color: #5A5A9A; border: 1px solid #2A2A55;"
+            " border-radius: 8px; font-size: 11px;"
+        )
+        left_layout.addWidget(self.waveform_label, 0)
+
+        # ---- 日志面板（移至左侧，放大） ----
+        log_group = QGroupBox("📋 运行日志 (Console)")
+        log_layout = QVBoxLayout(log_group)
+        log_layout.setContentsMargins(6, 20, 6, 6)
+        self.log_console = QTextEdit()
+        self.log_console.setReadOnly(True)
+        log_layout.addWidget(self.log_console)
+        left_layout.addWidget(log_group, 5)
 
         # ---------- 右：配置（带滚动） ----------
         right_scroll = QScrollArea()
@@ -408,18 +422,10 @@ class MainWindow(QMainWindow):
 
         right_layout.addWidget(config_group)
 
-        # ---- 日志 ----
-        log_group = QGroupBox("运行日志 (Console)")
-        log_layout = QVBoxLayout(log_group)
-        self.log_console = QTextEdit()
-        self.log_console.setReadOnly(True)
-        log_layout.addWidget(self.log_console)
-        right_layout.addWidget(log_group)
-
-        main_layout.addWidget(self.left_panel, 4)
+        main_layout.addWidget(self.left_panel, 5)
 
         right_scroll.setWidget(right_scroll_container)
-        main_layout.addWidget(right_scroll, 5)
+        main_layout.addWidget(right_scroll, 6)
 
         # 绑定联动
         self.chk_voice_clone.toggled.connect(self.toggle_clone_options)
@@ -527,19 +533,91 @@ class MainWindow(QMainWindow):
             self.res_w_spin.blockSignals(False)
             self.res_h_spin.blockSignals(False)
 
-    # -------- 样式 --------
+    # -------- 样式：深空科技风 --------
     def apply_apple_style(self):
         self.setStyleSheet("""
-        QWidget { font-family: "SF Pro Display", sans-serif; font-size: 14px; color: #1D1D1F; background-color: #F5F5F7; }
-        QGroupBox { background-color: #FFFFFF; border: 1px solid #E5E5EA; border-radius: 10px; margin-top: 12px; }
-        QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 0 8px; color: #86868B; font-weight: bold; }
-        QLineEdit, QComboBox, QSpinBox { border: 1px solid #D2D2D7; border-radius: 6px; padding: 6px 10px; background: #FFF; }
-        QPushButton { background-color: #007AFF; color: white; border-radius: 6px; padding: 8px; font-weight: bold; }
-        QPushButton:hover { background-color: #0051D5; }
-        QPushButton:disabled { background-color: #C7C7CC; }
-        QTextEdit { background-color: #1E1E1E; color: #32D74B; font-family: "Menlo", monospace; border-radius: 8px; padding: 10px;}
-        QProgressBar { border: 1px solid #D2D2D7; border-radius: 6px; text-align: center; height: 20px; background: #F5F5F7; }
-        QProgressBar::chunk { background-color: #007AFF; border-radius: 5px; }
+        QMainWindow { background-color: #0A0A1A; }
+        QWidget {
+            font-family: "SF Pro Display", "PingFang SC", sans-serif;
+            font-size: 13px; color: #D0D0E8;
+            background-color: #0A0A1A;
+        }
+        QGroupBox {
+            background-color: #14142B; border: 1px solid #262650;
+            border-radius: 10px; margin-top: 14px; padding: 12px 0 8px;
+        }
+        QGroupBox::title {
+            subcontrol-origin: margin; subcontrol-position: top left;
+            padding: 0 12px; color: #7C7CFF; font-weight: bold; font-size: 14px;
+        }
+        QLineEdit, QComboBox, QSpinBox {
+            background-color: #101025; border: 1px solid #2A2A5A;
+            border-radius: 6px; padding: 5px 10px; color: #E0E0F0;
+            selection-background-color: #2979FF;
+        }
+        QLineEdit:focus, QComboBox:focus, QSpinBox:focus {
+            border-color: #00BCD4;
+        }
+        QPushButton {
+            background-color: #2979FF; color: white; border-radius: 6px;
+            padding: 7px 14px; font-weight: bold; border: none;
+        }
+        QPushButton:hover { background-color: #1A6BFF; }
+        QPushButton:pressed { background-color: #0050D0; }
+        QPushButton:disabled { background-color: #252540; color: #5A5A7A; }
+        QTextEdit {
+            background-color: #080818; color: #00E676;
+            font-family: "Menlo", "JetBrains Mono", monospace;
+            border: 1px solid #1E1E40; border-radius: 6px; padding: 8px;
+        }
+        QProgressBar {
+            border: 1px solid #2A2A5A; border-radius: 6px; text-align: center;
+            background: #101025; color: #D0D0E8; height: 20px;
+        }
+        QProgressBar::chunk {
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 #00BCD4, stop:1 #2979FF);
+            border-radius: 5px;
+        }
+        QCheckBox { spacing: 8px; color: #C0C0E0; }
+        QCheckBox::indicator {
+            width: 16px; height: 16px; border-radius: 4px;
+            border: 2px solid #3A3A6A; background: #101025;
+        }
+        QCheckBox::indicator:checked {
+            background-color: #2979FF; border-color: #2979FF;
+        }
+        QRadioButton { spacing: 8px; color: #C0C0E0; }
+        QRadioButton::indicator {
+            width: 16px; height: 16px; border-radius: 8px;
+            border: 2px solid #3A3A6A; background: #101025;
+        }
+        QRadioButton::indicator:checked {
+            background-color: #2979FF; border-color: #2979FF;
+        }
+        QSlider::groove:horizontal {
+            height: 6px; background: #202045; border-radius: 3px;
+        }
+        QSlider::handle:horizontal {
+            background: #00BCD4; width: 14px; height: 14px;
+            margin: -4px 0; border-radius: 7px;
+        }
+        QScrollBar:vertical {
+            background: #0A0A1A; width: 8px; border: none;
+        }
+        QScrollBar::handle:vertical {
+            background: #2A2A5A; border-radius: 4px; min-height: 30px;
+        }
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
+        QComboBox QAbstractItemView {
+            background-color: #14142B; border: 1px solid #2A2A5A;
+            selection-background-color: #2979FF; color: #E0E0F0;
+        }
+        QComboBox::drop-down {
+            border: none; background: #2A2A5A; border-radius: 0 4px 4px 0;
+        }
+        QLabel { color: #D0D0E8; background: transparent; }
         """)
 
     # -------- 字幕源联动 --------
