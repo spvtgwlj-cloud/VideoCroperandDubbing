@@ -189,37 +189,54 @@ class MainWindow(QMainWindow):
         self.radio_horizontal.toggled.connect(self._toggle_resolution_controls)
         self.radio_vertical.toggled.connect(self._toggle_resolution_controls)
 
-        # ---- Row 7: 字幕 ----
+        # ---- Row 7: 字幕 + 音唇同步（右侧紧凑对齐） ----
         config_layout.addWidget(QLabel("字幕配置:"), 7, 0)
         self.chk_subtitle = QCheckBox("在画面上生成硬字幕")
         self.chk_subtitle.setChecked(True)
         config_layout.addWidget(self.chk_subtitle, 7, 1)
-        # 音唇同步调节说明
-        lbl_sync = QLabel("音唇同步（+ms音频延后/-ms提前）")
+        row7_right = QHBoxLayout()
+        row7_right.setContentsMargins(0, 0, 0, 0)
+        row7_right.setSpacing(6)
+        lbl_sync = QLabel("音唇同步（+ms延后/-ms提前）")
         lbl_sync.setStyleSheet("color: #7C7CFF; font-size: 12px; background: transparent;")
-        config_layout.addWidget(lbl_sync, 7, 2)
+        row7_right.addWidget(lbl_sync)
+        row7_right.addStretch()
         self.subtitle_offset_spin = QSpinBox()
         self.subtitle_offset_spin.setRange(-2000, 2000)
         self.subtitle_offset_spin.setValue(0)
         self.subtitle_offset_spin.setSuffix(" ms")
         self.subtitle_offset_spin.setSingleStep(100)
-        self.subtitle_offset_spin.setFixedWidth(90)
+        self.subtitle_offset_spin.setFixedWidth(85)
         self.subtitle_offset_spin.setToolTip(
             "音唇同步偏移量\n"
             "＋值 → 字幕延后（音频相对提前），适合音轨滞后的视频\n"
             "－值 → 字幕提前（音频相对延后），适合音轨超前的视频\n"
             "每步调节 ±100ms"
         )
-        config_layout.addWidget(self.subtitle_offset_spin, 7, 3)
+        row7_right.addWidget(self.subtitle_offset_spin)
+        config_layout.addLayout(row7_right, 7, 2, 1, 2)
 
-        # ---- Row 8: 字幕样式 ----
+        # ---- Row 8: 字幕样式（颜色+选项左侧，字号滑块右侧） ----
         config_layout.addWidget(QLabel("字幕样式:"), 8, 0)
+        # 左侧组合：颜色下拉 + 背景框 + 双语字幕
+        row8_left = QHBoxLayout()
+        row8_left.setContentsMargins(0, 0, 0, 0)
+        row8_left.setSpacing(12)
         self.sub_color_combo = QComboBox()
         self.sub_color_combo.addItems(list(SUBTITLE_COLORS.keys()))
-        config_layout.addWidget(self.sub_color_combo, 8, 1)
+        row8_left.addWidget(self.sub_color_combo)
+        self.chk_sub_bg = QCheckBox("背景框")
+        row8_left.addWidget(self.chk_sub_bg)
+        self.chk_bilingual = QCheckBox("双语字幕")
+        row8_left.addWidget(self.chk_bilingual)
+        row8_left.addStretch()
+        config_layout.addLayout(row8_left, 8, 1)
 
-        font_layout = QHBoxLayout()
-        font_layout.addWidget(QLabel("字号"))
+        # 右侧组合：字号滑块 + 百分比
+        row8_right = QHBoxLayout()
+        row8_right.setContentsMargins(0, 0, 0, 0)
+        row8_right.setSpacing(6)
+        row8_right.addWidget(QLabel("字号"))
         self.sub_font_slider = QSlider(Qt.Horizontal)
         self.sub_font_slider.setRange(30, 100)
         self.sub_font_slider.setValue(55)  # 0.055 = 5.5%
@@ -229,17 +246,9 @@ class MainWindow(QMainWindow):
         self.sub_font_slider.valueChanged.connect(
             lambda v: self.sub_font_label.setText(f"{v / 10:.1f}%")
         )
-        font_layout.addWidget(self.sub_font_slider)
-        font_layout.addWidget(self.sub_font_label)
-        config_layout.addLayout(font_layout, 8, 2)
-
-        self.chk_sub_bg = QCheckBox("背景框")
-        self.chk_bilingual = QCheckBox("双语字幕")
-        sub_checkbox_layout = QHBoxLayout()
-        sub_checkbox_layout.addWidget(self.chk_sub_bg)
-        sub_checkbox_layout.addWidget(self.chk_bilingual)
-        sub_checkbox_layout.addStretch()
-        config_layout.addLayout(sub_checkbox_layout, 8, 3)
+        row8_right.addWidget(self.sub_font_slider, 1)
+        row8_right.addWidget(self.sub_font_label)
+        config_layout.addLayout(row8_right, 8, 2, 1, 2)
 
         # ---- Row 9: 字幕导出 ----
         config_layout.addWidget(QLabel("字幕导出:"), 9, 0)
