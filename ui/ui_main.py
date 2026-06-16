@@ -166,12 +166,13 @@ class MainWindow(QMainWindow):
         lay_radio.addStretch()
         config_layout.addLayout(lay_radio, 5, 1, 1, 3)
 
-        # ---- Row 6: 输出分辨率 ----
+        # ---- Row 6: 输出分辨率（两个框等宽） ----
         config_layout.addWidget(QLabel("输出分辨率:"), 6, 0)
         self.res_w_spin = QSpinBox()
         self.res_w_spin.setRange(240, 4320)
         self.res_w_spin.setValue(1080)
         self.res_w_spin.setSuffix(" ×")
+        self.res_w_spin.setFixedWidth(90)
         config_layout.addWidget(self.res_w_spin, 6, 1)
         self.res_w_spin.valueChanged.connect(
             lambda v: self._update_aspect_ratio(self.res_w_spin, is_width=True))
@@ -179,6 +180,7 @@ class MainWindow(QMainWindow):
         self.res_h_spin.setRange(240, 4320)
         self.res_h_spin.setValue(1920)
         self.res_h_spin.setSuffix(" px")
+        self.res_h_spin.setFixedWidth(90)
         config_layout.addWidget(self.res_h_spin, 6, 2)
         self.res_h_spin.valueChanged.connect(
             lambda v: self._update_aspect_ratio(self.res_h_spin, is_width=False))
