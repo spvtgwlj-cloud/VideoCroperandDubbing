@@ -194,13 +194,23 @@ class MainWindow(QMainWindow):
         self.chk_subtitle = QCheckBox("在画面上生成硬字幕")
         self.chk_subtitle.setChecked(True)
         config_layout.addWidget(self.chk_subtitle, 7, 1)
+        # 音唇同步调节说明
+        lbl_sync = QLabel("音唇同步（+ms音频延后/-ms提前）")
+        lbl_sync.setStyleSheet("color: #7C7CFF; font-size: 12px; background: transparent;")
+        config_layout.addWidget(lbl_sync, 7, 2)
         self.subtitle_offset_spin = QSpinBox()
         self.subtitle_offset_spin.setRange(-2000, 2000)
         self.subtitle_offset_spin.setValue(0)
         self.subtitle_offset_spin.setSuffix(" ms")
         self.subtitle_offset_spin.setSingleStep(100)
-        self.subtitle_offset_spin.setToolTip("字幕时间轴整体偏移（负值提前，正值延后）")
-        config_layout.addWidget(self.subtitle_offset_spin, 7, 2, 1, 2)
+        self.subtitle_offset_spin.setFixedWidth(90)
+        self.subtitle_offset_spin.setToolTip(
+            "音唇同步偏移量\n"
+            "＋值 → 字幕延后（音频相对提前），适合音轨滞后的视频\n"
+            "－值 → 字幕提前（音频相对延后），适合音轨超前的视频\n"
+            "每步调节 ±100ms"
+        )
+        config_layout.addWidget(self.subtitle_offset_spin, 7, 3)
 
         # ---- Row 8: 字幕样式 ----
         config_layout.addWidget(QLabel("字幕样式:"), 8, 0)
