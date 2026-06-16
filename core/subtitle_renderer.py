@@ -207,7 +207,7 @@ def add_subtitle(frame, text, original_text="", enable_subtitle=True, subtitle_s
     # 双语原文：在译文上方间隔 2 个字体行
     # ========================================================
     if bilingual and orig_wrapped:
-        GAP_FONT_LINES = 2                     # 间隔行数
+        GAP_FONT_LINES = 1                     # 间隔行数（v4.2.5 从 2 改为 1）
         gap_px = max(4, int(font_size * GAP_FONT_LINES))  # 按译文字号计算间距
 
         orig_bbox_full = draw.textbbox((0, 0), orig_wrapped, font=orig_font, align="center")
