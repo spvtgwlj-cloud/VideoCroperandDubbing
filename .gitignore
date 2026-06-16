@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+
+# 虚拟环境
+venv/
+.venv/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 临时 / 输出
+temp_trim_*.mp4
+_waveform_temp.wav
+*.mp4_filtered*
+
+# 日志
+logs/
+*.log
+
+# 配置
+.env
+*.local.json
+settings.local.json
+
+# 预训练模型
+pretrained_models/
