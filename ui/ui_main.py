@@ -166,14 +166,17 @@ class MainWindow(QMainWindow):
         lay_radio.addStretch()
         config_layout.addLayout(lay_radio, 5, 1, 1, 3)
 
-        # ---- Row 6: 输出分辨率（两个框等宽） ----
+        # ---- Row 6: 输出分辨率（两个框等宽，紧凑排列） ----
         config_layout.addWidget(QLabel("输出分辨率:"), 6, 0)
+        res_spins = QHBoxLayout()
+        res_spins.setContentsMargins(0, 0, 0, 0)
+        res_spins.setSpacing(4)
         self.res_w_spin = QSpinBox()
         self.res_w_spin.setRange(240, 4320)
         self.res_w_spin.setValue(1080)
         self.res_w_spin.setSuffix(" ×")
         self.res_w_spin.setFixedWidth(90)
-        config_layout.addWidget(self.res_w_spin, 6, 1)
+        res_spins.addWidget(self.res_w_spin)
         self.res_w_spin.valueChanged.connect(
             lambda v: self._update_aspect_ratio(self.res_w_spin, is_width=True))
         self.res_h_spin = QSpinBox()
@@ -181,12 +184,15 @@ class MainWindow(QMainWindow):
         self.res_h_spin.setValue(1920)
         self.res_h_spin.setSuffix(" px")
         self.res_h_spin.setFixedWidth(90)
-        config_layout.addWidget(self.res_h_spin, 6, 2)
+        res_spins.addWidget(self.res_h_spin)
         self.res_h_spin.valueChanged.connect(
             lambda v: self._update_aspect_ratio(self.res_h_spin, is_width=False))
+        res_spins.addSpacing(8)
         self.chk_lock_aspect = QCheckBox("锁定 9:16")
         self.chk_lock_aspect.setChecked(True)
-        config_layout.addWidget(self.chk_lock_aspect, 6, 3)
+        res_spins.addWidget(self.chk_lock_aspect)
+        res_spins.addStretch()
+        config_layout.addLayout(res_spins, 6, 1, 1, 3)
         # 横屏时置灰分辨率控件
         self.radio_horizontal.toggled.connect(self._toggle_resolution_controls)
         self.radio_vertical.toggled.connect(self._toggle_resolution_controls)
@@ -570,13 +576,32 @@ class MainWindow(QMainWindow):
             subcontrol-origin: margin; subcontrol-position: top left;
             padding: 0 12px; color: #7C7CFF; font-weight: bold; font-size: 14px;
         }
-        QLineEdit, QComboBox, QSpinBox {
+        QLineEdit, QComboBox {
             background-color: #101025; border: 1px solid #2A2A5A;
             border-radius: 6px; padding: 5px 10px; color: #E0E0F0;
             selection-background-color: #2979FF;
         }
-        QLineEdit:focus, QComboBox:focus, QSpinBox:focus {
+        QLineEdit:focus, QComboBox:focus {
             border-color: #00BCD4;
+        }
+        /* SpinBox 单独处理：右侧留出按钮空间 + 按钮背景与边框区分 */
+        QSpinBox {
+            background-color: #101025; border: 1px solid #2A2A5A;
+            border-radius: 6px; padding: 5px 20px 5px 10px; color: #E0E0F0;
+            selection-background-color: #2979FF;
+        }
+        QSpinBox:focus { border-color: #00BCD4; }
+        QSpinBox::up-button, QSpinBox::down-button {
+            border: none; background: #181840; width: 14px;
+            margin-right: 1px;
+        }
+        QSpinBox::up-button {
+            subcontrol-position: right top;
+            border-radius: 0 4px 0 0; margin-top: 2px;
+        }
+        QSpinBox::down-button {
+            subcontrol-position: right bottom;
+            border-radius: 0 0 4px 0; margin-bottom: 2px;
         }
         QPushButton {
             background-color: #2979FF; color: white; border-radius: 6px;
