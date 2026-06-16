@@ -198,7 +198,6 @@ class MainWindow(QMainWindow):
         row7_right.setContentsMargins(0, 0, 0, 0)
         row7_right.setSpacing(6)
         lbl_sync = QLabel("音唇同步（+ms延后/-ms提前）")
-        lbl_sync.setStyleSheet("color: #7C7CFF; font-size: 12px; background: transparent;")
         row7_right.addWidget(lbl_sync)
         row7_right.addStretch()
         self.subtitle_offset_spin = QSpinBox()
