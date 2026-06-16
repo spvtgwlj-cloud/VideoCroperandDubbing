@@ -74,7 +74,7 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self.preview_label, 2)
 
         # 波形可视化（缩小高度）
-        self.waveform_label = QLabel("🎵 音频波形 (选择视频后自动生成)")
+        self.waveform_label = QLabel("🎵 音频波形 (仅展示前60秒)")
         self.waveform_label.setAlignment(Qt.AlignCenter)
         self.waveform_label.setFixedHeight(54)
         self.waveform_label.setStyleSheet(
@@ -716,7 +716,7 @@ class MainWindow(QMainWindow):
                                 else os.path.dirname(video_path), "_waveform_temp.wav")
         try:
             subprocess.run(
-                ["ffmpeg", "-y", "-i", video_path, "-t", "10",
+                ["ffmpeg", "-y", "-i", video_path, "-t", "60",
                  "-acodec", "pcm_s16le", "-ar", "22050", "-ac", "1", temp_wav],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True,
             )
