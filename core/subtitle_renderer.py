@@ -338,13 +338,13 @@ def add_subtitle(frame, text, original_text="", enable_subtitle=True, subtitle_s
         if title_font_size > max_overlay_font:
             title_font_size = max_overlay_font
             title_font = ImageFont.truetype(font_path, title_font_size) if font_path else ImageFont.load_default()
-        title_bbox = draw.textbbox((0, 0), overlay_title, font=title_font, align="left")
+        title_bbox = draw.textbbox((0, 0), overlay_title, font=title_font, align="center")
         title_w = title_bbox[2] - title_bbox[0]
         title_h = title_bbox[3] - title_bbox[1]
 
-        # 位置：译文下方 1 行字高，靠左对齐
+        # 位置：译文下方 1 行字高，居中放置
         title_y = y + text_h + max(4, int(font_size * GAP_FONT_LINES))
-        title_x = overlay_left_margin
+        title_x = (img_w - title_w) // 2
 
         # 黄色渐变圆角背景（左→右：透明 → #FFEB3B 86% opacity）
         pad = int(title_font_size * 0.3)
@@ -358,10 +358,10 @@ def add_subtitle(frame, text, original_text="", enable_subtitle=True, subtitle_s
             end_color=(255, 235, 59, 220),    # 右侧不透明
         )
 
-        # 黑色文字（靠左）
+        # 黑色文字（居中）
         draw.multiline_text(
             (title_x, title_y), overlay_title, font=title_font,
-            fill=(0, 0, 0), align="left",
+            fill=(0, 0, 0), align="center",
         )
 
     # ========================================================

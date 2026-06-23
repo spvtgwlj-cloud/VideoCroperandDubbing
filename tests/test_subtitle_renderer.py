@@ -228,7 +228,7 @@ class TestOverlayRendering:
     """Overlay 元素在帧上的渲染验证"""
 
     def test_overlay_title_appears(self):
-        """主标题以黄色渐变背景+黑色文字渲染，靠左对齐，右侧黄色深于左侧"""
+        """主标题以黄色渐变背景+黑色文字渲染，居中放置"""
         import cv2
         frame = _make_test_frame(1280, 720)
         out = add_subtitle(frame, "译文文本", original_text="Original",
@@ -249,10 +249,10 @@ class TestOverlayRendering:
             (bottom_third[:, :, 2] >= 220)
         )
         assert yellow_mask.sum() > 0, "未检测到黄色标题背景"
-        # 左对齐验证：黄色像素集中在前 60% 区域
+        # 居中验证：黄色应跨越屏幕中轴线两侧
         w = bottom_third.shape[1]
-        left_region = bottom_third[:, :int(w * 0.6), :]
-        right_region = bottom_third[:, int(w * 0.6):, :]
+        left_region = bottom_third[:, :w // 2, :]
+        right_region = bottom_third[:, w // 2:, :]
         left_yellow = (
             (left_region[:, :, 0] >= 40) & (left_region[:, :, 0] <= 80) &
             (left_region[:, :, 1] >= 200) &
@@ -263,8 +263,11 @@ class TestOverlayRendering:
             (right_region[:, :, 1] >= 200) &
             (right_region[:, :, 2] >= 220)
         ).sum()
-        assert left_yellow > right_yellow, (
-            f"标题未靠左: 左侧黄色像素={left_yellow}, 右侧={right_yellow}"
+        # 居中时两侧都应有黄色（共 > 50 像素），且比例不会极端偏斜
+        total_yellow = left_yellow + right_yellow
+        assert total_yellow > 50, f"黄色像素总量过少: {total_yellow}"
+        assert min(left_yellow, right_yellow) > 0, (
+            f"标题未居中: 左侧={left_yellow}, 右侧={right_yellow}"
         )
 
     def test_overlay_sharer_appears(self):

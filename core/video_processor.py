@@ -109,8 +109,8 @@ class VideoProcessorMixin:
             )
             subprocess.run(
                 ["ffmpeg", "-y",
-                 "-ss", str(self.highlight_start_sec),
                  "-i", self.final_output,
+                 "-ss", str(self.highlight_start_sec),
                  "-t", str(self.highlight_dur_sec),
                  "-c:v", v_codec, "-b:v", f"{self.bitrate_mbps}M",
                  "-c:a", "aac", "-b:a", "256k",
