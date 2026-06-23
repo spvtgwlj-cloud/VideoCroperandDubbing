@@ -68,7 +68,7 @@ class VideoProcessorMixin:
             "-i", self.final_audio,
             "-c:v", v_codec,
             "-pix_fmt", "yuv420p",
-            "-b:v", "4M",
+            "-b:v", f"{self.bitrate_mbps}M",
         ]
         if is_h265 and vt_ok:
             cmd.extend(["-tag:v", "hvc1"])
@@ -89,6 +89,65 @@ class VideoProcessorMixin:
             self.log_msg.emit(f"❌ 音视频合成失败 (错误码 {e.returncode}): {error_details}")
         except Exception as e:
             self.log_msg.emit(f"❌ 音视频合成发生异常: {e}")
+
+    # -------- 视频爆点（片头截取 + 拼接） --------
+
+    def _prepend_highlight(self):
+        """从处理后视频中截取片段，用 concat filter 拼接到视频最前面"""
+        highlight_clip = os.path.join(self.output_dir, "highlight_clip.mp4")
+        merged_output = os.path.join(self.output_dir, "merged_final.mp4")
+
+        # 探测编码器（复用 merge_audio_video 中的逻辑）
+        is_h265 = "H.265" in self.codec
+        vt_ok = self._check_videotoolbox_available()
+        v_codec = ("hevc_videotoolbox" if is_h265 else "h264_videotoolbox") if vt_ok else ("libx265" if is_h265 else "libx264")
+
+        try:
+            # Step 1: 从 final_output 截取片段（重编码确保关键帧对齐）
+            self.log_msg.emit(
+                f"🔥 视频爆点: 从第 {self.highlight_start_sec} 秒截取 {self.highlight_dur_sec} 秒片头..."
+            )
+            subprocess.run(
+                ["ffmpeg", "-y",
+                 "-ss", str(self.highlight_start_sec),
+                 "-i", self.final_output,
+                 "-t", str(self.highlight_dur_sec),
+                 "-c:v", v_codec, "-b:v", f"{self.bitrate_mbps}M",
+                 "-c:a", "aac", "-b:a", "256k",
+                 "-pix_fmt", "yuv420p",
+                 highlight_clip],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True,
+            )
+
+            # Step 2: concat filter 拼接（可靠，不受容器限制）
+            subprocess.run(
+                ["ffmpeg", "-y",
+                 "-i", highlight_clip,
+                 "-i", self.final_output,
+                 "-filter_complex",
+                 "[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[outv][outa]",
+                 "-map", "[outv]", "-map", "[outa]",
+                 "-c:v", v_codec, "-b:v", f"{self.bitrate_mbps}M",
+                 "-c:a", "aac", "-b:a", "256k",
+                 "-pix_fmt", "yuv420p",
+                 "-movflags", "+faststart",
+                 merged_output],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True,
+            )
+
+            # Step 3: 替换原文件
+            os.remove(self.final_output)
+            os.rename(merged_output, self.final_output)
+            self.log_msg.emit("✅ 视频爆点片头已添加到视频最前面")
+
+        except subprocess.CalledProcessError as e:
+            self.log_msg.emit(f"⚠️ 视频爆点处理失败: {e.stderr[-200:] if e.stderr else str(e)}")
+        finally:
+            if os.path.exists(highlight_clip):
+                try:
+                    os.remove(highlight_clip)
+                except OSError:
+                    pass
 
     # -------- 字幕导出 & 外部字幕加载 --------
 
@@ -300,6 +359,9 @@ class VideoProcessorMixin:
         self.progress_changed.emit(90)
         if self.running:
             self.merge_audio_video()
+            # 视频爆点：截取片头 → 拼接到最前面
+            if self.highlight_enabled:
+                self._prepend_highlight()
             self.progress_changed.emit(100)
             self.log_msg.emit(f"🎉 全部处理完成！文件保存在: {self.final_output}")
         # 清理裁剪临时文件

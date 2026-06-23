@@ -64,6 +64,58 @@ class MainWindow(QMainWindow):
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(8)
 
+        # ---- 预览区（视频爆点控件 + 视频预览） ----
+        preview_row = QHBoxLayout()
+        preview_row.setSpacing(6)
+
+        # 视频爆点控件（左侧，约 30%）
+        highlight_box = QVBoxLayout()
+        highlight_box.setSpacing(4)
+        self.chk_highlight = QCheckBox("🔥 视频爆点")
+        self.chk_highlight.setStyleSheet(
+            "QCheckBox { color: #7C7CFF; font-size: 13px; background: transparent; }"
+            "QCheckBox::indicator:checked { background-color: #FF6D00; }"
+        )
+        highlight_box.addWidget(self.chk_highlight)
+
+        hl_time_row = QHBoxLayout()
+        hl_time_row.setSpacing(4)
+        hl_time_row.addWidget(QLabel("起始:"))
+        self.highlight_start_spin = QSpinBox()
+        self.highlight_start_spin.setRange(0, 99999)
+        self.highlight_start_spin.setSuffix(" 秒")
+        self.highlight_start_spin.setEnabled(False)
+        self.highlight_start_spin.setToolTip("从处理后视频的该绝对时间截取片段")
+        self.highlight_start_spin.setStyleSheet(
+            "QSpinBox { background-color: #101025; color: #CCCCDD;"
+            " border: 1px solid #2A2A5A; border-radius: 4px; padding: 2px 6px; font-size: 11px; }"
+        )
+        hl_time_row.addWidget(self.highlight_start_spin)
+
+        hl_time_row.addWidget(QLabel("时长:"))
+        self.highlight_dur_spin = QSpinBox()
+        self.highlight_dur_spin.setRange(1, 5)
+        self.highlight_dur_spin.setValue(3)
+        self.highlight_dur_spin.setSuffix(" 秒")
+        self.highlight_dur_spin.setEnabled(False)
+        self.highlight_dur_spin.setToolTip("截取时长，最长 5 秒")
+        self.highlight_dur_spin.setStyleSheet(
+            "QSpinBox { background-color: #101025; color: #CCCCDD;"
+            " border: 1px solid #2A2A5A; border-radius: 4px; padding: 2px 6px; font-size: 11px; }"
+        )
+        hl_time_row.addWidget(self.highlight_dur_spin)
+        self.chk_highlight.toggled.connect(self.highlight_start_spin.setEnabled)
+        self.chk_highlight.toggled.connect(self.highlight_dur_spin.setEnabled)
+        highlight_box.addLayout(hl_time_row)
+
+        hl_note = QLabel("(最长5秒，放片头)")
+        hl_note.setStyleSheet("color: #5A5A9A; font-size: 9px; background: transparent; border: none;")
+        highlight_box.addWidget(hl_note)
+        highlight_box.addStretch()
+
+        preview_row.addLayout(highlight_box)
+
+        # 视频预览（右侧，拉伸填充）
         self.preview_label = QLabel("🎬 视频预览")
         self.preview_label.setAlignment(Qt.AlignCenter)
         self.preview_label.setMinimumHeight(120)
@@ -71,7 +123,9 @@ class MainWindow(QMainWindow):
             "background-color: #0D0D20; color: #5A5A9A; border: 1px solid #2A2A55;"
             " border-radius: 10px; font-size: 14px;"
         )
-        left_layout.addWidget(self.preview_label, 2)
+        preview_row.addWidget(self.preview_label, 1)
+
+        left_layout.addLayout(preview_row, 2)
 
         # 波形可视化（缩小高度）
         self.waveform_label = QLabel("🎵 音频波形 (仅展示前60秒)")
@@ -88,7 +142,7 @@ class MainWindow(QMainWindow):
         overlay_group.setStyleSheet(
             "QGroupBox { color: #8888CC; border: 1px solid #2A2A55;"
             " border-radius: 8px; margin-top: 14px; padding-top: 16px;"
-            " background-color: #14142B; font-size: 11px; }"
+            " background-color: #14142B; font-size: 14px; font-weight: bold; }"
             "QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 6px; }"
         )
         overlay_layout_inner = QVBoxLayout(overlay_group)
@@ -99,7 +153,7 @@ class MainWindow(QMainWindow):
         title_row = QHBoxLayout()
         title_row.setSpacing(6)
         title_label = QLabel("主标题:")
-        title_label.setStyleSheet("color: #AAAACC; font-size: 11px; background: transparent; border: none;")
+        title_label.setStyleSheet("color: #D0D0E8; font-size: 13px; background: transparent; border: none;")
         title_row.addWidget(title_label)
         self.overlay_title_edit = QLineEdit()
         self.overlay_title_edit.setPlaceholderText("输入视频主标题（最多16个汉字）")
@@ -116,7 +170,7 @@ class MainWindow(QMainWindow):
         sharer_row = QHBoxLayout()
         sharer_row.setSpacing(6)
         sharer_label = QLabel("分享人:")
-        sharer_label.setStyleSheet("color: #AAAACC; font-size: 11px; background: transparent; border: none;")
+        sharer_label.setStyleSheet("color: #D0D0E8; font-size: 13px; background: transparent; border: none;")
         sharer_row.addWidget(sharer_label)
         self.overlay_sharer_edit = QLineEdit()
         self.overlay_sharer_edit.setPlaceholderText("输入分享人名称")
@@ -456,15 +510,16 @@ class MainWindow(QMainWindow):
         preview_layout.addStretch()
         config_layout.addLayout(preview_layout, 17, 1, 1, 3)
 
-        config_layout.addWidget(QLabel("编码/帧率:"), 18, 0)
+        config_layout.addWidget(QLabel("编码/码率:"), 18, 0)
         self.codec_combo = QComboBox()
         self.codec_combo.addItems(["H.264 (MP4)", "H.265 (HEVC)"])
         config_layout.addWidget(self.codec_combo, 18, 1)
-        self.fps_spin = QSpinBox()
-        self.fps_spin.setRange(15, 120)
-        self.fps_spin.setValue(30)
-        self.fps_spin.setSuffix(" FPS")
-        config_layout.addWidget(self.fps_spin, 18, 2, 1, 2)
+        self.bitrate_spin = QSpinBox()
+        self.bitrate_spin.setRange(1, 20)
+        self.bitrate_spin.setValue(4)
+        self.bitrate_spin.setSuffix(" Mbps")
+        self.bitrate_spin.setToolTip("输出视频码率，越大画质越好文件越大")
+        config_layout.addWidget(self.bitrate_spin, 18, 2, 1, 2)
 
         # ---- Row 19: 进度条 ----
         self.progress_bar = QProgressBar()
@@ -506,10 +561,10 @@ class MainWindow(QMainWindow):
 
         right_layout.addWidget(config_group)
 
-        main_layout.addWidget(self.left_panel, 5)
-
+        # 配置面板在左，预览/波形/叠加/日志在右（v4.3.0 左右互换）
         right_scroll.setWidget(right_scroll_container)
         main_layout.addWidget(right_scroll, 6)
+        main_layout.addWidget(self.left_panel, 5)
 
         # 绑定联动
         self.chk_voice_clone.toggled.connect(self.toggle_clone_options)
@@ -537,9 +592,9 @@ class MainWindow(QMainWindow):
             if idx >= 0:
                 self.codec_combo.setCurrentIndex(idx)
 
-        fps = preset["fps"]
-        if fps > 0:
-            self.fps_spin.setValue(fps)
+        bitrate = preset.get("bitrate", 4)
+        if bitrate > 0:
+            self.bitrate_spin.setValue(bitrate)
 
         ow, oh = preset.get("ow", 0), preset.get("oh", 0)
         if ow > 0 and oh > 0:
@@ -902,7 +957,8 @@ class MainWindow(QMainWindow):
             is_vertical=self.radio_vertical.isChecked(),
             target_lang=self.audio_lang.currentText(),
             codec=self.codec_combo.currentText(),
-            fps=self.fps_spin.value(),
+            fps=30,
+            bitrate_mbps=self.bitrate_spin.value(),
             enable_subtitle=self.chk_subtitle.isChecked(),
             enable_voice_clone=self.chk_voice_clone.isChecked(),
             clone_mode=0 if self.radio_clone_video.isChecked() else 1,
@@ -923,6 +979,9 @@ class MainWindow(QMainWindow):
                 0: self.combo_edge_spk0.currentData(),
                 1: self.combo_edge_spk1.currentData(),
             },
+            highlight_enabled=self.chk_highlight.isChecked(),
+            highlight_start_sec=self.highlight_start_spin.value(),
+            highlight_dur_sec=self.highlight_dur_spin.value(),
         )
 
         self.thread.update_frame.connect(self.update_preview)
@@ -999,7 +1058,7 @@ class MainWindow(QMainWindow):
             "quick_preview": self.chk_quick_preview.isChecked(),
             "quick_preview_sec": self.quick_preview_sec.value(),
             "codec": self.codec_combo.currentText(),
-            "fps": self.fps_spin.value(),
+            "bitrate_mbps": self.bitrate_spin.value(),
             "output_w": self.res_w_spin.value(),
             "output_h": self.res_h_spin.value(),
             "lock_aspect": self.chk_lock_aspect.isChecked(),
@@ -1012,6 +1071,9 @@ class MainWindow(QMainWindow):
             "edge_tts_voice_1": self.combo_edge_spk1.currentData(),
             "overlay_title": self.overlay_title_edit.text().strip(),
             "overlay_sharer": self.overlay_sharer_edit.text().strip(),
+            "highlight_enabled": self.chk_highlight.isChecked(),
+            "highlight_start_sec": self.highlight_start_spin.value(),
+            "highlight_dur_sec": self.highlight_dur_spin.value(),
         }
         file_path, _ = QFileDialog.getSaveFileName(self, "保存配置模板", "", "JSON 文件 (*.json)")
         if not file_path:
@@ -1085,7 +1147,7 @@ class MainWindow(QMainWindow):
         self.chk_quick_preview.setChecked(config.get("quick_preview", False))
         self.quick_preview_sec.setValue(config.get("quick_preview_sec", 15))
         _restore_combo(self.codec_combo, "codec")
-        self.fps_spin.setValue(config.get("fps", 30))
+        self.bitrate_spin.setValue(config.get("bitrate_mbps", 4))
 
         self.res_w_spin.setValue(config.get("output_w", 1080))
         self.res_h_spin.setValue(config.get("output_h", 1920))
@@ -1103,6 +1165,14 @@ class MainWindow(QMainWindow):
         # 视频叠加信息
         self.overlay_title_edit.setText(config.get("overlay_title", ""))
         self.overlay_sharer_edit.setText(config.get("overlay_sharer", ""))
+
+        # 视频爆点
+        hl_enabled = config.get("highlight_enabled", False)
+        self.chk_highlight.setChecked(hl_enabled)
+        self.highlight_start_spin.setEnabled(hl_enabled)
+        self.highlight_start_spin.setValue(config.get("highlight_start_sec", 0))
+        self.highlight_dur_spin.setEnabled(hl_enabled)
+        self.highlight_dur_spin.setValue(config.get("highlight_dur_sec", 3))
 
         self.log(f"📂 配置已加载: {file_path}")
 

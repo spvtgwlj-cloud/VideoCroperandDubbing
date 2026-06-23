@@ -36,16 +36,24 @@ class VideoProcessThread(QThread, AudioPipelineMixin, VideoProcessorMixin):
                  export_subtitle=False,
                  subtitle_file_path="",
                  enable_edge_tts_first=False,
-                 edge_tts_voices=None):
+                 edge_tts_voices=None,
+                 highlight_enabled=False,
+                 highlight_start_sec=0,
+                 highlight_dur_sec=3,
+                 bitrate_mbps=4):
         super().__init__()
         self.input_source = input_source
         self.is_vertical = is_vertical
         self.target_lang = target_lang
         self.fps = fps
         self.codec = codec
+        self.bitrate_mbps = bitrate_mbps
         self.enable_subtitle = enable_subtitle
         self.enable_voice_clone = enable_voice_clone
         self.clone_mode = clone_mode
+        self.highlight_enabled = highlight_enabled
+        self.highlight_start_sec = highlight_start_sec
+        self.highlight_dur_sec = highlight_dur_sec
         self.upload_configs = upload_configs
         self.trim_start = trim_start
         self.trim_end = trim_end

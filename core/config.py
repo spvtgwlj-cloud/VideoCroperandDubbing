@@ -17,12 +17,12 @@ os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 # 平台预设模板
 # ==========================================
 PLATFORM_PRESETS = {
-    "手动配置":     {"is_vertical": None, "subtitle_pos": -1,     "codec": None,           "fps": 0,   "ow": 0, "oh": 0, "desc": "使用下方自定义设置"},
-    "抖音 / 视频号": {"is_vertical": True,  "subtitle_pos": 0.25, "codec": "H.264 (MP4)",  "fps": 30,  "ow": 1080, "oh": 1920, "desc": "9:16 竖屏，字幕避让底部 UI"},
-    "快手":          {"is_vertical": True,  "subtitle_pos": 0.20, "codec": "H.265 (HEVC)", "fps": 30,  "ow": 1080, "oh": 1920, "desc": "9:16 竖屏，字幕略靠下"},
-    "小红书":        {"is_vertical": True,  "subtitle_pos": 0.15, "codec": "H.264 (MP4)",  "fps": 30,  "ow": 1080, "oh": 1440, "desc": "3:4 竖屏，适合图文/视频笔记"},
-    "B站":          {"is_vertical": False, "subtitle_pos": 0.08, "codec": "H.265 (HEVC)", "fps": 30,  "ow": 0, "oh": 0, "desc": "横屏保留原比例"},
-    "YouTube":      {"is_vertical": False, "subtitle_pos": 0.08, "codec": "H.264 (MP4)",  "fps": 30,  "ow": 0, "oh": 0, "desc": "横屏，兼容性优先"},
+    "手动配置":     {"is_vertical": None, "subtitle_pos": -1,     "codec": None,           "bitrate": 0, "ow": 0, "oh": 0, "desc": "使用下方自定义设置"},
+    "抖音 / 视频号": {"is_vertical": True,  "subtitle_pos": 0.25, "codec": "H.264 (MP4)",  "bitrate": 4, "ow": 1080, "oh": 1920, "desc": "9:16 竖屏，字幕避让底部 UI"},
+    "快手":          {"is_vertical": True,  "subtitle_pos": 0.20, "codec": "H.265 (HEVC)", "bitrate": 4, "ow": 1080, "oh": 1920, "desc": "9:16 竖屏，字幕略靠下"},
+    "小红书":        {"is_vertical": True,  "subtitle_pos": 0.15, "codec": "H.264 (MP4)",  "bitrate": 4, "ow": 1080, "oh": 1440, "desc": "3:4 竖屏，适合图文/视频笔记"},
+    "B站":          {"is_vertical": False, "subtitle_pos": 0.08, "codec": "H.265 (HEVC)", "bitrate": 4, "ow": 0, "oh": 0, "desc": "横屏保留原比例"},
+    "YouTube":      {"is_vertical": False, "subtitle_pos": 0.08, "codec": "H.264 (MP4)",  "bitrate": 4, "ow": 0, "oh": 0, "desc": "横屏，兼容性优先"},
 }
 
 # 字幕颜色预设 (RGB 三元组)
