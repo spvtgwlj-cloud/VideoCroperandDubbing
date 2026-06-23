@@ -281,14 +281,12 @@ class TestOverlayRendering:
                               "overlay_title": "",
                               "overlay_sharer": "张三",
                           })
-        # 分享人位置在译文上方，检查帧中间 1/3 区域
-        third_start = out.shape[0] // 3
-        third_end = out.shape[0] * 2 // 3
-        middle_region = out[third_start:third_end, :, :]
-        # 检查是否有明显非黑像素（白色文字或紫色背景）
-        bright_pixels = (middle_region.max(axis=2) > 100)
+        # 分享人位于译文上方（帧下半部），检查帧后 2/3 区域
+        region_start = out.shape[0] // 3
+        region = out[region_start:, :, :]
+        bright_pixels = (region.max(axis=2) > 100)
         assert bright_pixels.sum() > 100, (
-            f"未检测到分享人渲染内容，中间区域 max 像素值: {middle_region.max()}"
+            f"未检测到分享人渲染内容，下半区域 max 像素值: {region.max()}"
         )
 
     def test_overlay_sharer_gradient_fades(self):

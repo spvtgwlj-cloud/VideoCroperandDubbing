@@ -322,6 +322,11 @@ def add_subtitle(frame, text, original_text="", enable_subtitle=True, subtitle_s
         title_font_size, title_font = _fit_text_to_width(
             overlay_title, img_w, font_path or "", draw
         )
+        # 限制最大字号：比字幕字体大2号（+4px），避免短标题字体过大
+        max_overlay_font = font_size + 4
+        if title_font_size > max_overlay_font:
+            title_font_size = max_overlay_font
+            title_font = ImageFont.truetype(font_path, title_font_size) if font_path else ImageFont.load_default()
         title_bbox = draw.textbbox((0, 0), overlay_title, font=title_font, align="left")
         title_w = title_bbox[2] - title_bbox[0]
         title_h = title_bbox[3] - title_bbox[1]
@@ -362,6 +367,11 @@ def add_subtitle(frame, text, original_text="", enable_subtitle=True, subtitle_s
             sharer_font_size, sharer_font = _fit_text_to_width(
                 sharer_label, img_w, font_path or "", draw
             )
+            # 限制最大字号：比字幕字体大2号（+4px）
+            max_overlay_font = font_size + 4
+            if sharer_font_size > max_overlay_font:
+                sharer_font_size = max_overlay_font
+                sharer_font = ImageFont.truetype(font_path, sharer_font_size) if font_path else ImageFont.load_default()
         sharer_bbox = draw.textbbox((0, 0), sharer_label, font=sharer_font, align="left")
         sharer_w = sharer_bbox[2] - sharer_bbox[0]
         sharer_h = sharer_bbox[3] - sharer_bbox[1]
