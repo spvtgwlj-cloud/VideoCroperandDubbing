@@ -1,9 +1,9 @@
 # 视频智能裁剪和配音产品 — 产品需求文档 (PRD)
 
-**版本**: v4.2.5  
-**最后更新**: 2026-06-16  
+**版本**: v4.2.6  
+**最后更新**: 2026-06-23  
 **产品名称**: AI Video Dubbing Pro  
-**文档状态**: ✅ 已发布 | UI 深色科技风重构 + 布局优化 + 音唇同步说明
+**文档状态**: ✅ 已发布 | 双 Overlay 字幕叠加 + 音唇同步修复 + 视频裁剪修正 + 线程安全
 
 ---
 
@@ -31,7 +31,7 @@
 
 ---
 
-## 2. 当前已实现功能 (v4.2.5)
+## 2. 当前已实现功能 (v4.2.6)
 
 ### 2.1 核心管线功能
 
@@ -96,19 +96,30 @@
 | 42 | **字幕配置行优化** | ✅ 已完成 | P2 | **v4.2.5 新增**：Row 7 右侧合并「音唇同步」标签 + 偏移 spinbox 为 HBoxLayout；Row 8 左侧颜色+背景框+双语字幕组合，右侧字号滑块 span 2 列 |
 | 43 | **分辨率输入框等宽紧凑** | ✅ 已完成 | P2 | **v4.2.5 新增**：宽/高 spinbox 统一 90px 等宽，HBoxLayout 紧挨排列，锁定复选框自然跟随 |
 | 44 | **SpinBox 右边框修复** | ✅ 已完成 | P2 | **v4.2.5 修复**：QSpinBox 分离独立样式，上下按钮背景 #181840（区别于边框 #2A2A5A），margin-right:1px，右边框可见 |
+| 45 | **视频主标题 Overlay** | ✅ 已完成 | P2 | **v4.2.6 新增**：在翻译字幕下方叠加视频主标题，靠左对齐，黑色字体 + 黄色渐变圆角背景（左淡→右浓），字号自适应屏幕宽度，最多 16 汉字 |
+| 46 | **分享人 Overlay** | ✅ 已完成 | P2 | **v4.2.6 新增**：在原声字幕上方叠加 @分享人名称，靠左对齐，白色字体 + 紫色渐变圆角背景（左浓→右透明），字号同主标题 |
+| 47 | **Overlay UI 输入** | ✅ 已完成 | P2 | **v4.2.6 新增**：左侧面板波形与日志之间新增「视频叠加信息」GroupBox，包含主标题/分享人两个 QLineEdit，深色科技风样式 |
+| 48 | **视频裁剪 UX 重设计** | ✅ 已完成 | P2 | **v4.2.6 改进**：去除 QSpinBox 歧义 SpecialValueText，改用「从 [X] 秒 到 [Y] 秒」清晰标签，tooltip 说明 0=不裁剪 |
+| 49 | **视频裁剪 ffmpeg 修正** | ✅ 已完成 | P1 | **v4.2.6 修复**：`-to` 参数从 `-i` 后移至 `-i` 前（输入选项），语义从「持续时长」修正为「截止位置」 |
+| 50 | **音唇同步修复** | ✅ 已完成 | P1 | **v4.2.6 修复**：声音克隆路径从压缩时间戳改为原始时间戳驱动 TTS，消除音频前移导致的音画不同步 |
+| 51 | **线程安全加固** | ✅ 已完成 | P1 | **v4.2.6 修复**：closeEvent 断开信号后停止线程，trim 子进程前后加 running 检查，防止窗口关闭时 QThread 析构崩溃 |
+| 52 | **输出码率调整** | ✅ 已完成 | P2 | **v4.2.6 调整**：视频码率从 5 Mbps 降至 4 Mbps |
 
-### 2.5 工程质量 (v4.2.5)
+### 2.5 工程质量 (v4.2.6)
 
 | # | 功能 | 状态 | 详细说明 |
 |---|------|------|---------|
 | 41 | **urllib3 警告过滤** | ✅ | `entry.py` 启动时 `warnings.filterwarnings` + 显式 `import requests` |
-| 42 | **测试套件** | ✅ | 50 个 pytest 测试（单元 35 + E2E 15），覆盖 4 条处理路径 |
+| 42 | **测试套件** | ✅ | 59 个 pytest 测试（单元 44 + E2E 15），覆盖 4 条处理路径 + Overlay 渲染 |
 | 43 | **Code Review 修复 (v4.2.3)** | ✅ | 10 项修复：Critical×2 + High×2 + Medium×3 + Low×3 |
-| 44 | **Code Review 修复 (v4.2.4)** | ✅ | 新增 10 项修复：Critical×2 + High×2 + Medium×3 + Low×3（段排序、Path A trim、SRT换行、零时长守卫、atempo异常、临时文件泄露、僵尸进程、死代码、O(n)→O(1)） |
+| 44 | **Code Review 修复 (v4.2.4)** | ✅ | 新增 10 项修复：Critical×2 + High×2 + Medium×3 + Low×3 |
+| 45 | **音唇同步修复 (v4.2.6)** | ✅ | 声音克隆 TTS 时间轴从压缩段落改为原始段落 |
+| 46 | **ffmpeg -to 参数修正 (v4.2.6)** | ✅ | `-to` 从输出选项改为输入选项，修正裁剪时长 |
+| 47 | **QThread 安全退出 (v4.2.6)** | ✅ | closeEvent 断开 finished 信号 + trim 子进程 running 检查 |
 
 ---
 
-## 3. 处理路径架构 (v4.2.5)
+## 3. 处理路径架构 (v4.2.6)
 
 ```
 _process_single() 入口
@@ -140,34 +151,34 @@ _process_single() 入口
 
 ---
 
-## 4. 技术架构
+## 4. 技术架构 (v4.2.6)
 
-### 4.1 文件结构 (v4.2.5)
+### 4.1 文件结构 (v4.2.6)
 
 ```
 VideoCropper-LLMBased/
 ├── entry.py                              # 主入口（含 urllib3 警告过滤）
 ├── ui/
-│   └── ui_main.py                        # MainWindow 主 UI（~924 行）
+│   └── ui_main.py                        # MainWindow 主 UI（~1115 行）
 ├── core/
 │   ├── config.py                         # 全局常量 / API KEY / 预设模板 / Edge-TTS 音色列表（~55 行）
-│   ├── process_thread.py                 # VideoProcessThread (QThread), run+stop（~145 行）
-│   ├── audio_pipeline.py                 # AudioPipelineMixin, run_ai_pipeline（~630 行）
+│   ├── process_thread.py                 # VideoProcessThread (QThread), run+stop（~152 行）
+│   ├── audio_pipeline.py                 # AudioPipelineMixin, run_ai_pipeline（~656 行）
 │   │   ├── _compress_silence()           # 静音压缩（原始位置算 gap）
 │   │   ├── _assign_speakers_by_overlap() # SRT→声纹映射
-│   │   ├── _run_cosyvoice_tts()          # CosyVoice TTS（3 次重试，v4.2.4 提取为子方法）
-│   │   ├── _run_edge_tts()               # Edge-TTS 合成（v4.2.4 提取为子方法）
+│   │   ├── _run_cosyvoice_tts()          # CosyVoice TTS（3 次重试）
+│   │   ├── _run_edge_tts()               # Edge-TTS 合成
 │   │   └── run_ai_pipeline()             # AI 核心管线（支持 TTS 策略排序）
-│   ├── video_processor.py                # VideoProcessorMixin, _process_single（~290 行）
-│   ├── subtitle_renderer.py              # 字幕渲染纯函数, 无 Qt 依赖（~250 行）
+│   ├── video_processor.py                # VideoProcessorMixin, _process_single（~310 行）
+│   ├── subtitle_renderer.py              # 字幕+Overlay 渲染纯函数, 无 Qt 依赖（~390 行）
 │   └── voice_cloner.py                   # CosyVoice 音色克隆, 三层回退（~61 行）
-├── tests/                                # 50 个测试
+├── tests/                                # 59 个测试
 │   ├── conftest.py                       # 共享 fixtures
-│   ├── test_subtitle_renderer.py         # 13 tests
+│   ├── test_subtitle_renderer.py         # 22 tests（+9 Overlay 渲染测试）
 │   ├── test_audio_pipeline.py            # 15 tests
 │   ├── test_video_processor.py           # 8 tests
 │   └── test_e2e_pipeline.py              # 14 tests
-├── HANDOFF_v4.2.4_20260615.md            # 开发交接文档
+├── HANDOFF_v4.2.5_20260616.md            # 开发交接文档
 ├── 视频智能裁剪和配音产品-PRD.md           # 本文件
 └── AI视频配音Pro-使用手册.md              # 用户使用手册
 ```
@@ -306,7 +317,7 @@ pytest tests/ -v                   # 运行测试
 
 ## 6. 已知问题
 
-**所有 P0 问题已在 v4.2.4 修复，当前无已知阻塞性 bug。**
+**所有 P0 问题已在 v4.2.6 修复，当前无已知阻塞性 bug。**
 
 | # | 问题 | 影响 | 版本 | 状态 |
 |---|------|------|:---:|:--:|
@@ -320,6 +331,10 @@ pytest tests/ -v                   # 运行测试
 | 8 | `_compress_silence` 段乱序 | 用已偏移 end 算 gap 致段顺序错误 | v4.2.4 | ✅ 已修复 |
 | 9 | Path A 跳过 trim 裁剪 | 裁剪预处理未在 Path A 执行 | v4.2.4 | ✅ 已修复 |
 | 10 | SRT `##ORIG##` 原文换行损毁 | 换行符导致 SRT 重新解析破坏 | v4.2.4 | ✅ 已修复 |
+| 11 | 声音克隆音唇不同步 | 压缩段落时间轴驱动 TTS 致音频前移 | v4.2.6 | ✅ 已修复 |
+| 12 | 视频裁剪 `-to` 语义错误 | `-to` 被解释为时长而非截止位置 | v4.2.6 | ✅ 已修复 |
+| 13 | 关窗时 QThread 析构崩溃 | closeEvent 未断开信号，线程被窗口销毁拖死 | v4.2.6 | ✅ 已修复 |
+| 14 | 分享人渐变背景丢失 | paste mask 覆盖渐变图 alpha 通道 | v4.2.6 | ✅ 已修复 |
 
 ---
 
@@ -382,7 +397,8 @@ pytest tests/ -v                   # 运行测试
 | **v4.2.3** | **2026-06-15** | **P0×3 修复**(编码回退/urllib3/进度条单调) + **Path B**(外部SRT+声音克隆) + **50测试** + **Code Review 10项修复** |
 | **v4.2.4** | **2026-06-15** | **Edge-TTS 优先输出 + 分角色音色下拉框（10 种音色） + TTS 双策略排序 + Code Review 10 项修复（段排序/Path A trim/SRT换行/零时长守卫/atempo异常/临时文件泄漏/僵尸进程/死代码/O(n)→O(1)）** |
 | **v4.2.5** | **2026-06-16** | **UI 深色科技风全主题重构 + 左侧三栏布局（预览缩/波形缩/日志移左放大）+ 双语字幕间隔 2→1 行 + 音唇同步说明 + Row 7/8 布局均匀化 + 分辨率等宽紧凑 + SpinBox 右边框修复** |
+| **v4.2.6** | **2026-06-23** | **双 Overlay 字幕叠加（主标题+分享人，渐变圆角背景） + 音唇同步修复（TTS 使用原始时间戳） + 视频裁剪修正（`-to` 输入选项 + UX 重设计 + 线程安全退出） + 输出码率 5→4 Mbps + 59 测试** |
 
 ---
 
-*本文档为产品需求文档，开发交接请参阅 HANDOFF_v4.2.4_20260615.md（下次交接更新至 v4.2.5）*
+*本文档为产品需求文档，开发交接请参阅 HANDOFF_v4.2.5_20260616.md*

@@ -18,7 +18,6 @@ class MockThread(VideoProcessorMixin):
         self.subtitle_file_path = ""
         self.export_subtitle = True
 
-
 class TestExportSrt:
     """_export_srt 守卫测试"""
 

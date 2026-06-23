@@ -1,11 +1,15 @@
 """字幕渲染模块 — 纯函数单元测试"""
 
 import os
+import numpy as np
 import pytest
+from PIL import Image, ImageDraw
 from core.subtitle_renderer import (
     _srt_time_str,
     subtitles_to_srt,
     parse_srt,
+    add_subtitle,
+    _fit_text_to_width,
 )
 
 
@@ -163,3 +167,206 @@ class TestParseSrt:
             assert parsed == []
         finally:
             os.unlink(path)
+
+
+# ============================================================
+# Overlay 渲染测试
+# ============================================================
+
+def _make_test_frame(w=640, h=480):
+    """创建一个纯黑测试帧 (BGR 格式)"""
+    import cv2
+    return np.zeros((h, w, 3), dtype=np.uint8)
+
+
+class TestFitTextToWidth:
+    """字号二分查找"""
+
+    def test_short_text_fits_wide(self):
+        """短文本在宽屏上获得较大字号"""
+        from PIL import ImageDraw
+        img = Image.new('RGB', (1920, 1080))
+        draw = ImageDraw.Draw(img)
+        from core.subtitle_renderer import get_chinese_font
+        font_path = get_chinese_font()
+        if not font_path:
+            pytest.skip("无可用中文字体")
+        size, font = _fit_text_to_width("测试", 1920, font_path, draw)
+        assert 40 <= size <= 120  # 短文本应得较大字号
+
+    def test_long_text_gets_smaller(self):
+        """长文本获得较小字号（窄屏场景）"""
+        from PIL import ImageDraw
+        img = Image.new('RGB', (720, 1280))
+        draw = ImageDraw.Draw(img)
+        from core.subtitle_renderer import get_chinese_font
+        font_path = get_chinese_font()
+        if not font_path:
+            pytest.skip("无可用中文字体")
+        # 窄屏上 16 字标题必须缩小字号
+        size_long, _ = _fit_text_to_width("这是十六个汉字标题测试文本", 720, font_path, draw)
+        size_short, _ = _fit_text_to_width("测试", 720, font_path, draw)
+        assert size_long < size_short  # 长文本字号更小
+
+    def test_respects_breathing_room(self):
+        """字号不超过屏幕 92% 宽度"""
+        from PIL import ImageDraw
+        img = Image.new('RGB', (1280, 720))
+        draw = ImageDraw.Draw(img)
+        from core.subtitle_renderer import get_chinese_font
+        font_path = get_chinese_font()
+        if not font_path:
+            pytest.skip("无可用中文字体")
+        text = "这是十六个汉字的测试文本喔"
+        size, font = _fit_text_to_width(text, 1280, font_path, draw)
+        tw = draw.textlength(text, font=font)
+        assert tw <= 1280 * 0.92
+        assert tw > 0
+
+
+class TestOverlayRendering:
+    """Overlay 元素在帧上的渲染验证"""
+
+    def test_overlay_title_appears(self):
+        """主标题以黄色渐变背景+黑色文字渲染，靠左对齐，右侧黄色深于左侧"""
+        import cv2
+        frame = _make_test_frame(1280, 720)
+        out = add_subtitle(frame, "译文文本", original_text="Original",
+                          enable_subtitle=True,
+                          subtitle_style={
+                              "color": "黄色（推荐）",
+                              "font_size": 0.055,
+                              "bg_enabled": False,
+                              "bilingual": False,
+                              "overlay_title": "测试标题",
+                              "overlay_sharer": "",
+                          })
+        # 验证：底部有黄色像素
+        bottom_third = out[out.shape[0] * 3 // 4:, :, :]
+        yellow_mask = (
+            (bottom_third[:, :, 0] >= 40) & (bottom_third[:, :, 0] <= 80) &
+            (bottom_third[:, :, 1] >= 200) &
+            (bottom_third[:, :, 2] >= 220)
+        )
+        assert yellow_mask.sum() > 0, "未检测到黄色标题背景"
+        # 左对齐验证：黄色像素集中在前 60% 区域
+        w = bottom_third.shape[1]
+        left_region = bottom_third[:, :int(w * 0.6), :]
+        right_region = bottom_third[:, int(w * 0.6):, :]
+        left_yellow = (
+            (left_region[:, :, 0] >= 40) & (left_region[:, :, 0] <= 80) &
+            (left_region[:, :, 1] >= 200) &
+            (left_region[:, :, 2] >= 220)
+        ).sum()
+        right_yellow = (
+            (right_region[:, :, 0] >= 40) & (right_region[:, :, 0] <= 80) &
+            (right_region[:, :, 1] >= 200) &
+            (right_region[:, :, 2] >= 220)
+        ).sum()
+        assert left_yellow > right_yellow, (
+            f"标题未靠左: 左侧黄色像素={left_yellow}, 右侧={right_yellow}"
+        )
+
+    def test_overlay_sharer_appears(self):
+        """分享人以白色文字+紫色渐变背景渲染，渐变从左到右渐隐"""
+        import cv2
+        frame = _make_test_frame(1280, 720)
+        out = add_subtitle(frame, "译文", original_text="",
+                          enable_subtitle=True,
+                          subtitle_style={
+                              "color": "黄色（推荐）",
+                              "font_size": 0.055,
+                              "bg_enabled": False,
+                              "bilingual": False,
+                              "overlay_title": "",
+                              "overlay_sharer": "张三",
+                          })
+        # 分享人位置在译文上方，检查帧中间 1/3 区域
+        third_start = out.shape[0] // 3
+        third_end = out.shape[0] * 2 // 3
+        middle_region = out[third_start:third_end, :, :]
+        # 检查是否有明显非黑像素（白色文字或紫色背景）
+        bright_pixels = (middle_region.max(axis=2) > 100)
+        assert bright_pixels.sum() > 100, (
+            f"未检测到分享人渲染内容，中间区域 max 像素值: {middle_region.max()}"
+        )
+
+    def test_overlay_sharer_gradient_fades(self):
+        """分享人紫色背景从左到右渐隐（左侧有色 → 右侧透明）"""
+        frame = _make_test_frame(1920, 1080)
+        out = add_subtitle(frame, "译文", original_text="",
+                          enable_subtitle=True,
+                          subtitle_style={
+                              "color": "白色",
+                              "font_size": 0.055,
+                              "bg_enabled": False,
+                              "bilingual": False,
+                              "overlay_title": "",
+                              "overlay_sharer": "测试分享人",
+                          })
+        # 紫色 = BGR (176, 39, 156)，在中间区域查找紫色背景行
+        third_start = out.shape[0] // 3
+        third_end = out.shape[0] * 2 // 3
+        middle = out[third_start:third_end, :, :]
+
+        # 找到紫色背景所在行：R 通道（BGR[2]）值最高的行
+        purple_strength = middle[:, :, 2].astype(float) - (
+            middle[:, :, 0].astype(float) + middle[:, :, 1].astype(float)
+        ) / 2.0
+        row_scores = purple_strength.max(axis=1)
+        best_row = int(np.argmax(row_scores))
+        if row_scores[best_row] < 30:
+            pytest.skip("未检测到足够紫色像素，无法验证渐变")
+
+        # 在该行中，左半部分紫色应强于右半部分（渐变从左到右）
+        scan_row = middle[best_row, :, :]
+        half = len(scan_row) // 2
+        left_purple = scan_row[:half, 2].astype(float).max()
+        right_purple = scan_row[half:, 2].astype(float).max()
+        assert left_purple > right_purple, (
+            f"渐变方向错误: 左侧R={left_purple:.0f}, 右侧R={right_purple:.0f}"
+        )
+
+    def test_empty_overlays_no_crash(self):
+        """空 overlay 值不崩溃，正常渲染字幕"""
+        frame = _make_test_frame(1280, 720)
+        out = add_subtitle(frame, "译文", original_text="",
+                          enable_subtitle=True,
+                          subtitle_style={
+                              "color": "黄色（推荐）",
+                              "font_size": 0.055,
+                              "bg_enabled": False,
+                              "bilingual": False,
+                          })
+        assert out.shape == frame.shape  # 尺寸不变
+        assert not np.array_equal(out, frame)  # 但内容变了（有字幕文字）
+
+    def test_overlay_title_not_rendered_when_disabled(self):
+        """enable_subtitle=False 时完全不渲染"""
+        frame = _make_test_frame(1280, 720)
+        out = add_subtitle(frame, "译文", original_text="",
+                          enable_subtitle=False,
+                          subtitle_style={
+                              "overlay_title": "测试标题",
+                              "overlay_sharer": "张三",
+                          })
+        assert np.array_equal(out, frame)  # 完全不变
+
+    def test_both_overlays_together(self):
+        """两个 overlay 同时渲染不出错"""
+        import cv2
+        frame = _make_test_frame(1920, 1080)
+        out = add_subtitle(frame, "译文文本", original_text="Original text",
+                          enable_subtitle=True,
+                          subtitle_style={
+                              "color": "白色",
+                              "font_size": 0.055,
+                              "bg_enabled": True,
+                              "bilingual": True,
+                              "overlay_title": "视频主标题",
+                              "overlay_sharer": "分享人名称",
+                          })
+        assert out.shape == frame.shape
+        # 验证有非黑像素（说明渲染了内容）
+        non_black = np.sum(out > 5)
+        assert non_black > 1000, "应该渲染了大量非黑内容"

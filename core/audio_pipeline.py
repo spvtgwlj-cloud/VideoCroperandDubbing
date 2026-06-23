@@ -284,8 +284,9 @@ class AudioPipelineMixin:
         total_audio_ms = len(orig_audio_segment)
         temp_slice_path = os.path.join(self.output_dir, "temp_slice.wav")
 
-        total_embed = len(segments)
-        for idx, seg in enumerate(segments):
+        # 使用未压缩段落的时间戳提取音频切片，确保 TTS 配音与视频口型同步
+        total_embed = len(uncompressed_segments)
+        for idx, seg in enumerate(uncompressed_segments):
             if not self.running:
                 return False
             progress = 20 + int((idx / total_embed) * 15) if total_embed > 0 else 20

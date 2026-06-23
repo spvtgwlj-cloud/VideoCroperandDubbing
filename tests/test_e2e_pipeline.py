@@ -89,7 +89,6 @@ def _mock_whisper_transcribe(audio_path):
         {"start": 9.0, "end": 11.5, "text": "Final words here"},
     ]}
 
-
 def _mock_subprocess_success(*args, **kwargs):
     """模拟 subprocess.run 成功返回"""
     result = MagicMock()

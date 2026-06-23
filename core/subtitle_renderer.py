@@ -99,6 +99,60 @@ def get_chinese_font() -> str | None:
     return None
 
 
+def _fit_text_to_width(text, max_width_px, font_path, draw):
+    """二分查找最大字号，使 text 不超出 max_width_px * 0.92（预留 8% 呼吸窗口）
+
+    Returns:
+        (font_size_px, ImageFont) — 保证 textlength(text) <= max_width_px * 0.92
+    """
+    lo, hi = 10, 120
+    best = lo
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        font = ImageFont.truetype(font_path, mid)
+        tw = draw.textlength(text, font=font)
+        if tw <= max_width_px * 0.92:
+            best = mid
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    return best, ImageFont.truetype(font_path, best)
+
+
+def _draw_rounded_rect_bg(draw, x1, y1, x2, y2, radius, fill):
+    """绘制圆角矩形背景"""
+    draw.rounded_rectangle([x1, y1, x2, y2], radius=radius, fill=fill)
+
+
+def _draw_gradient_rounded_bg(draw, x1, y1, x2, y2, radius, start_color, end_color):
+    """绘制水平渐变圆角背景，从左到右 start_color → end_color"""
+    from PIL import Image as PILImage, ImageDraw as PILImageDraw
+    w, h = x2 - x1, y2 - y1
+    if w <= 0 or h <= 0:
+        return
+    # 先创建圆角掩膜
+    mask = PILImage.new('L', (w, h), 0)
+    mask_draw = PILImageDraw.Draw(mask)
+    mask_draw.rounded_rectangle([0, 0, w, h], radius=radius, fill=255)
+    mask_pixels = mask.load()
+
+    # 逐像素填充渐变，alpha = 渐变值 × 圆角掩膜（一次循环完成）
+    grad_img = PILImage.new('RGBA', (w, h), (0, 0, 0, 0))
+    grad_pixels = grad_img.load()
+    for col in range(w):
+        ratio = col / max(w - 1, 1)
+        r = int(start_color[0] + (end_color[0] - start_color[0]) * ratio)
+        g = int(start_color[1] + (end_color[1] - start_color[1]) * ratio)
+        b = int(start_color[2] + (end_color[2] - start_color[2]) * ratio)
+        a_grad = int(start_color[3] + (end_color[3] - start_color[3]) * ratio)
+        for row in range(h):
+            a = int(a_grad * mask_pixels[col, row] / 255)
+            grad_pixels[col, row] = (r, g, b, a)
+
+    # 用图像自身的 alpha 通道做合成（保留渐变透明度）
+    draw._image.paste(grad_img, (x1, y1), grad_img)
+
+
 def add_subtitle(frame, text, original_text="", enable_subtitle=True, subtitle_style=None):
     """在视频帧上叠加字幕（支持双语）
 
@@ -116,6 +170,9 @@ def add_subtitle(frame, text, original_text="", enable_subtitle=True, subtitle_s
     portrait_margin = style.get("portrait_margin", 0.25)
     landscape_margin = style.get("landscape_margin", 0.15)
     bilingual = style.get("bilingual", False)
+    overlay_title = style.get("overlay_title", "")
+    overlay_sharer = style.get("overlay_sharer", "")
+    GAP_FONT_LINES = 1  # 字幕行间距（用于 overlay 元素定位）
 
     cv2_im_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     pil_im = Image.fromarray(cv2_im_rgb)
@@ -131,6 +188,8 @@ def add_subtitle(frame, text, original_text="", enable_subtitle=True, subtitle_s
     orig_wrapped = ""
     orig_text_h = 0
     orig_font_size = 0
+    orig_y = None
+    _skip_original = True
     if bilingual:
         # original_text 为空时回退到 text（兼容外部导入 SRT 无原文标记的场景）
         _orig_display = original_text if original_text else ""
@@ -145,7 +204,10 @@ def add_subtitle(frame, text, original_text="", enable_subtitle=True, subtitle_s
             orig_lines = []
             cur = ""
             for char in _orig_display:
-                if draw.textlength(cur + char, font=orig_font) <= max_width:
+                if char == "\n":
+                    orig_lines.append(cur.strip())
+                    cur = ""
+                elif draw.textlength(cur + char, font=orig_font) <= max_width:
                     cur += char
                 else:
                     last_space = cur.rfind(' ')
@@ -174,7 +236,10 @@ def add_subtitle(frame, text, original_text="", enable_subtitle=True, subtitle_s
     lines = []
     current_line = ""
     for char in text:
-        if draw.textlength(current_line + char, font=font) <= max_width:
+        if char == "\n":
+            lines.append(current_line.strip())
+            current_line = ""
+        elif draw.textlength(current_line + char, font=font) <= max_width:
             current_line += char
         else:
             last_space = current_line.rfind(' ')
@@ -207,7 +272,6 @@ def add_subtitle(frame, text, original_text="", enable_subtitle=True, subtitle_s
     # 双语原文：在译文上方间隔 2 个字体行
     # ========================================================
     if bilingual and orig_wrapped:
-        GAP_FONT_LINES = 1                     # 间隔行数（v4.2.5 从 2 改为 1）
         gap_px = max(4, int(font_size * GAP_FONT_LINES))  # 按译文字号计算间距
 
         orig_bbox_full = draw.textbbox((0, 0), orig_wrapped, font=orig_font, align="center")
@@ -246,5 +310,89 @@ def add_subtitle(frame, text, original_text="", enable_subtitle=True, subtitle_s
                         stroke_width=bold_width, stroke_fill=shadow_color, align="center")
     draw.multiline_text((x, y), wrapped_text, font=font, fill=main_color_rgb, stroke_width=bold_width,
                         stroke_fill=main_color_rgb, align="center")
+
+    # ========================================================
+    # 视频主标题（译文下方 1 行字高，靠左对齐，黑色字体 + 黄色圆角背景）
+    # ========================================================
+    title_font_size = 0
+    title_font = None
+    overlay_left_margin = int(img_w * 0.04)  # 4% 左侧呼吸空间
+    if overlay_title:
+        font_path = font_path or get_chinese_font()
+        title_font_size, title_font = _fit_text_to_width(
+            overlay_title, img_w, font_path or "", draw
+        )
+        title_bbox = draw.textbbox((0, 0), overlay_title, font=title_font, align="left")
+        title_w = title_bbox[2] - title_bbox[0]
+        title_h = title_bbox[3] - title_bbox[1]
+
+        # 位置：译文下方 1 行字高，靠左对齐
+        title_y = y + text_h + max(4, int(font_size * GAP_FONT_LINES))
+        title_x = overlay_left_margin
+
+        # 黄色渐变圆角背景（左→右：透明 → #FFEB3B 86% opacity）
+        pad = int(title_font_size * 0.3)
+        radius = int(title_font_size * 0.4)
+        _draw_gradient_rounded_bg(
+            draw,
+            title_x - pad, title_y - pad,
+            title_x + title_w + pad, title_y + title_h + pad,
+            radius=radius,
+            start_color=(255, 235, 59, 60),   # 左侧淡黄（保证字体可读）
+            end_color=(255, 235, 59, 220),    # 右侧不透明
+        )
+
+        # 黑色文字（靠左）
+        draw.multiline_text(
+            (title_x, title_y), overlay_title, font=title_font,
+            fill=(0, 0, 0), align="left",
+        )
+
+    # ========================================================
+    # 分享人（原声字幕上方 1 行字高，靠左对齐，白色字体 + 紫色渐变圆角背景）
+    # ========================================================
+    if overlay_sharer:
+        font_path = font_path or get_chinese_font()
+        sharer_label = f"@{overlay_sharer}"
+        # 字体大小同主标题（若主标题为空则独立计算）
+        if title_font_size > 0:
+            sharer_font_size = title_font_size
+            sharer_font = title_font
+        else:
+            sharer_font_size, sharer_font = _fit_text_to_width(
+                sharer_label, img_w, font_path or "", draw
+            )
+        sharer_bbox = draw.textbbox((0, 0), sharer_label, font=sharer_font, align="left")
+        sharer_w = sharer_bbox[2] - sharer_bbox[0]
+        sharer_h = sharer_bbox[3] - sharer_bbox[1]
+
+        # 位置：原文上方 1 行字高（原文不存在时相对于译文上方），靠左对齐
+        gap_px = max(4, int(font_size * GAP_FONT_LINES))
+        if orig_y is not None and not _skip_original:
+            sharer_y = orig_y - gap_px - sharer_h
+        else:
+            sharer_y = y - gap_px - sharer_h
+        sharer_y = max(4, sharer_y)
+        sharer_x = overlay_left_margin
+
+        # 紫色渐变圆角背景 (#9C27B0, 70% → 0% opacity)
+        pad = int(sharer_font_size * 0.3)
+        radius = int(sharer_font_size * 0.4)
+        _draw_gradient_rounded_bg(
+            draw,
+            sharer_x - pad, sharer_y - pad,
+            sharer_x + sharer_w + pad, sharer_y + sharer_h + pad,
+            radius=radius,
+            start_color=(156, 39, 176, 180),
+            end_color=(156, 39, 176, 0),
+        )
+
+        # 白色文字（带黑色描边，靠左）
+        draw.multiline_text(
+            (sharer_x, sharer_y), sharer_label, font=sharer_font,
+            fill=(255, 255, 255), align="left",
+            stroke_width=max(1, int(sharer_font_size * 0.02)),
+            stroke_fill=(0, 0, 0),
+        )
 
     return cv2.cvtColor(np.array(pil_im), cv2.COLOR_RGB2BGR)

@@ -68,7 +68,7 @@ class VideoProcessorMixin:
             "-i", self.final_audio,
             "-c:v", v_codec,
             "-pix_fmt", "yuv420p",
-            "-b:v", "5M",
+            "-b:v", "4M",
         ]
         if is_h265 and vt_ok:
             cmd.extend(["-tag:v", "hvc1"])
@@ -132,20 +132,32 @@ class VideoProcessorMixin:
         # ---- 视频裁剪预处理（所有路径共享） ----
         temp_trim_path = None
         if self.trim_start > 0 or self.trim_end > 0:
-            self.log_msg.emit(f"✂️ 正在裁剪视频: {self.trim_start}s ~ {self.trim_end or '结尾'}s")
+            if not self.running:
+                return
+            self.log_msg.emit(
+                f"✂️ 正在裁剪视频: 从第 {self.trim_start} 秒 → 到第 {self.trim_end or '结尾'} 秒"
+            )
             temp_trim_path = os.path.join(self.output_dir, "temp_trimmed.mp4")
             cmd = ["ffmpeg", "-y"]
             if self.trim_start > 0:
                 cmd.extend(["-ss", str(self.trim_start)])
-            cmd.extend(["-i", self.input_source])
             if self.trim_end > 0:
                 cmd.extend(["-to", str(self.trim_end)])
+            cmd.extend(["-i", self.input_source])
             cmd.extend(["-c", "copy", temp_trim_path])
             try:
                 subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
                 self.input_source = temp_trim_path
             except subprocess.CalledProcessError as e:
                 self.log_msg.emit(f"⚠️ 视频裁剪失败，使用原始视频: {e.stderr[-200:] if e.stderr else ''}")
+            # 裁剪子进程可能持续很久，检查用户是否已停止
+            if not self.running:
+                if temp_trim_path and os.path.exists(temp_trim_path):
+                    try:
+                        os.remove(temp_trim_path)
+                    except OSError:
+                        pass
+                return
 
         # ---- 确定处理路径 ----
         srt_driven = self.subtitle_file_path and self.enable_voice_clone

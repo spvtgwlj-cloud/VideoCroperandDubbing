@@ -83,6 +83,54 @@ class MainWindow(QMainWindow):
         )
         left_layout.addWidget(self.waveform_label, 0)
 
+        # ---- 视频叠加信息 ----
+        overlay_group = QGroupBox("🏷️ 视频叠加信息 (Video Overlay)")
+        overlay_group.setStyleSheet(
+            "QGroupBox { color: #8888CC; border: 1px solid #2A2A55;"
+            " border-radius: 8px; margin-top: 14px; padding-top: 16px;"
+            " background-color: #14142B; font-size: 11px; }"
+            "QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 6px; }"
+        )
+        overlay_layout_inner = QVBoxLayout(overlay_group)
+        overlay_layout_inner.setContentsMargins(8, 18, 8, 8)
+        overlay_layout_inner.setSpacing(5)
+
+        # 主标题输入行
+        title_row = QHBoxLayout()
+        title_row.setSpacing(6)
+        title_label = QLabel("主标题:")
+        title_label.setStyleSheet("color: #AAAACC; font-size: 11px; background: transparent; border: none;")
+        title_row.addWidget(title_label)
+        self.overlay_title_edit = QLineEdit()
+        self.overlay_title_edit.setPlaceholderText("输入视频主标题（最多16个汉字）")
+        self.overlay_title_edit.setMaxLength(16)
+        self.overlay_title_edit.setStyleSheet(
+            "QLineEdit { background-color: #101025; color: #CCCCDD;"
+            " border: 1px solid #2A2A5A; border-radius: 5px; padding: 4px 8px; font-size: 12px; }"
+            "QLineEdit:focus { border-color: #2979FF; }"
+        )
+        title_row.addWidget(self.overlay_title_edit)
+        overlay_layout_inner.addLayout(title_row)
+
+        # 分享人输入行
+        sharer_row = QHBoxLayout()
+        sharer_row.setSpacing(6)
+        sharer_label = QLabel("分享人:")
+        sharer_label.setStyleSheet("color: #AAAACC; font-size: 11px; background: transparent; border: none;")
+        sharer_row.addWidget(sharer_label)
+        self.overlay_sharer_edit = QLineEdit()
+        self.overlay_sharer_edit.setPlaceholderText("输入分享人名称")
+        self.overlay_sharer_edit.setMaxLength(20)
+        self.overlay_sharer_edit.setStyleSheet(
+            "QLineEdit { background-color: #101025; color: #CCCCDD;"
+            " border: 1px solid #2A2A5A; border-radius: 5px; padding: 4px 8px; font-size: 12px; }"
+            "QLineEdit:focus { border-color: #2979FF; }"
+        )
+        sharer_row.addWidget(self.overlay_sharer_edit)
+        overlay_layout_inner.addLayout(sharer_row)
+
+        left_layout.addWidget(overlay_group, 0)
+
         # ---- 日志面板（移至左侧，放大） ----
         log_group = QGroupBox("📋 运行日志 (Console)")
         log_layout = QVBoxLayout(log_group)
@@ -90,7 +138,7 @@ class MainWindow(QMainWindow):
         self.log_console = QTextEdit()
         self.log_console.setReadOnly(True)
         log_layout.addWidget(self.log_console)
-        left_layout.addWidget(log_group, 5)
+        left_layout.addWidget(log_group, 4)
 
         # ---------- 右：配置（带滚动） ----------
         right_scroll = QScrollArea()
@@ -137,17 +185,27 @@ class MainWindow(QMainWindow):
         config_layout.addWidget(self.lbl_batch_count, 2, 3)
 
         # ---- Row 3: 视频裁剪 ----
-        config_layout.addWidget(QLabel("视频裁剪:"), 3, 0)
+        config_layout.addWidget(QLabel("视频裁剪 (0=不裁剪):"), 3, 0)
+
+        trim_start_layout = QHBoxLayout()
+        trim_start_layout.setSpacing(3)
+        trim_start_layout.addWidget(QLabel("从"))
         self.trim_start = QSpinBox()
         self.trim_start.setRange(0, 99999)
-        self.trim_start.setSuffix(" 秒 起始")
-        self.trim_start.setSpecialValueText("从开头")
-        config_layout.addWidget(self.trim_start, 3, 1)
+        self.trim_start.setSuffix(" 秒")
+        self.trim_start.setToolTip("裁剪起始位置（秒），0 = 从视频开头开始")
+        trim_start_layout.addWidget(self.trim_start)
+        config_layout.addLayout(trim_start_layout, 3, 1)
+
+        trim_end_layout = QHBoxLayout()
+        trim_end_layout.setSpacing(3)
+        trim_end_layout.addWidget(QLabel("到"))
         self.trim_end = QSpinBox()
         self.trim_end.setRange(0, 99999)
-        self.trim_end.setSuffix(" 秒 结束")
-        self.trim_end.setSpecialValueText("到结尾")
-        config_layout.addWidget(self.trim_end, 3, 2, 1, 2)
+        self.trim_end.setSuffix(" 秒")
+        self.trim_end.setToolTip("裁剪结束位置（秒），0 = 到视频结尾结束")
+        trim_end_layout.addWidget(self.trim_end)
+        config_layout.addLayout(trim_end_layout, 3, 2, 1, 2)
 
         # ---- Row 4: 目标语言 ----
         config_layout.addWidget(QLabel("目标语言:"), 4, 0)
@@ -819,6 +877,8 @@ class MainWindow(QMainWindow):
             "font_size": self.sub_font_slider.value() / 1000.0,
             "bg_enabled": self.chk_sub_bg.isChecked(),
             "bilingual": self.chk_bilingual.isChecked(),
+            "overlay_title": self.overlay_title_edit.text().strip(),
+            "overlay_sharer": self.overlay_sharer_edit.text().strip(),
         }
 
         # 快速预览
@@ -950,6 +1010,8 @@ class MainWindow(QMainWindow):
             "enable_edge_tts_first": self.chk_edge_tts_first.isChecked(),
             "edge_tts_voice_0": self.combo_edge_spk0.currentData(),
             "edge_tts_voice_1": self.combo_edge_spk1.currentData(),
+            "overlay_title": self.overlay_title_edit.text().strip(),
+            "overlay_sharer": self.overlay_sharer_edit.text().strip(),
         }
         file_path, _ = QFileDialog.getSaveFileName(self, "保存配置模板", "", "JSON 文件 (*.json)")
         if not file_path:
@@ -1038,9 +1100,19 @@ class MainWindow(QMainWindow):
             self.radio_sub_auto.setChecked(True)
         self.subtitle_file_path.setText(config.get("subtitle_file_path", ""))
 
+        # 视频叠加信息
+        self.overlay_title_edit.setText(config.get("overlay_title", ""))
+        self.overlay_sharer_edit.setText(config.get("overlay_sharer", ""))
+
         self.log(f"📂 配置已加载: {file_path}")
 
     def closeEvent(self, event):
-        if self.thread:
+        if self.thread is not None:
+            # 断开信号防止窗口销毁期间触发回调
+            try:
+                self.thread.finished.disconnect(self.reset_processing_state)
+            except TypeError:
+                pass
             self.thread.stop()
+            self.thread = None
         event.accept()
