@@ -142,6 +142,17 @@ class AudioPipelineMixin:
     def run_ai_pipeline(self, srt_timeline=None):
         """AI 核心管线。srt_timeline 不为 None 时跳过 LLM 翻译，
         直接用 SRT 条目的文本和时间戳驱动 TTS 生成。"""
+        # ---- 硬件加速检测 ----
+        _mps_available = False
+        try:
+            import torch as _torch
+            _mps_available = _torch.backends.mps.is_available()
+            _torch.set_num_threads(os.cpu_count() or 4)
+        except Exception:
+            pass
+        if _mps_available:
+            self.log_msg.emit("🚀 Apple MPS (GPU) 加速已启用")
+
         # 视频裁剪已在 _process_single 预处理中完成
         input_to_use = self.input_source
 
@@ -198,7 +209,7 @@ class AudioPipelineMixin:
         import warnings
         warnings.filterwarnings("ignore")
         model = whisper.load_model("turbo")
-        result = model.transcribe(trimmed_orig_audio)
+        result = model.transcribe(trimmed_orig_audio, fp16=_mps_available)
         segments = result["segments"]
         if not segments:
             self.log_msg.emit("❌ 未检测到语音！")
@@ -278,7 +289,7 @@ class AudioPipelineMixin:
         classifier = EncoderClassifier.from_hparams(
             source="speechbrain/spkrec-ecapa-voxceleb",
             savedir="pretrained_models/spkrec-ecapa-voxceleb",
-            run_opts={"device": "cpu"},
+            run_opts={"device": "mps" if _mps_available else "cpu"},
         )
         embeddings = []
         total_audio_ms = len(orig_audio_segment)

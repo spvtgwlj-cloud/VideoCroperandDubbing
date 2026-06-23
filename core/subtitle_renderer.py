@@ -1,6 +1,8 @@
 """字幕绘制模块 — 纯函数，无 Qt 依赖"""
 
 import os
+from functools import lru_cache
+
 import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
@@ -99,24 +101,30 @@ def get_chinese_font() -> str | None:
     return None
 
 
-def _fit_text_to_width(text, max_width_px, font_path, draw):
-    """二分查找最大字号，使 text 不超出 max_width_px * 0.92（预留 8% 呼吸窗口）
+@lru_cache(maxsize=16)
+def _fit_text_to_width_cached(text, max_width_px, font_path):
+    """二分查找最大字号（缓存版，使用 font.getlength 避免依赖 draw 对象）
 
-    Returns:
-        (font_size_px, ImageFont) — 保证 textlength(text) <= max_width_px * 0.92
+    Returns font_size_px (int) — 不返回 font 对象以避免缓存失效。
     """
     lo, hi = 10, 120
     best = lo
     while lo <= hi:
         mid = (lo + hi) // 2
         font = ImageFont.truetype(font_path, mid)
-        tw = draw.textlength(text, font=font)
+        tw = font.getlength(text)
         if tw <= max_width_px * 0.92:
             best = mid
             lo = mid + 1
         else:
             hi = mid - 1
-    return best, ImageFont.truetype(font_path, best)
+    return best
+
+
+def _fit_text_to_width(text, max_width_px, font_path, draw=None):
+    """二分查找最大字号（兼容旧签名，内部调用缓存版 + 创建 font 对象）"""
+    size = _fit_text_to_width_cached(text, max_width_px, font_path)
+    return size, ImageFont.truetype(font_path, size)
 
 
 def _draw_rounded_rect_bg(draw, x1, y1, x2, y2, radius, fill):
@@ -124,19 +132,15 @@ def _draw_rounded_rect_bg(draw, x1, y1, x2, y2, radius, fill):
     draw.rounded_rectangle([x1, y1, x2, y2], radius=radius, fill=fill)
 
 
-def _draw_gradient_rounded_bg(draw, x1, y1, x2, y2, radius, start_color, end_color):
-    """绘制水平渐变圆角背景，从左到右 start_color → end_color"""
+@lru_cache(maxsize=8)
+def _make_gradient_bg(w, h, radius, start_color, end_color):
+    """生成并缓存渐变圆角背景 RGBA 图像（逐帧复用，避免重复像素运算）"""
     from PIL import Image as PILImage, ImageDraw as PILImageDraw
-    w, h = x2 - x1, y2 - y1
-    if w <= 0 or h <= 0:
-        return
-    # 先创建圆角掩膜
     mask = PILImage.new('L', (w, h), 0)
     mask_draw = PILImageDraw.Draw(mask)
     mask_draw.rounded_rectangle([0, 0, w, h], radius=radius, fill=255)
     mask_pixels = mask.load()
 
-    # 逐像素填充渐变，alpha = 渐变值 × 圆角掩膜（一次循环完成）
     grad_img = PILImage.new('RGBA', (w, h), (0, 0, 0, 0))
     grad_pixels = grad_img.load()
     for col in range(w):
@@ -148,8 +152,15 @@ def _draw_gradient_rounded_bg(draw, x1, y1, x2, y2, radius, start_color, end_col
         for row in range(h):
             a = int(a_grad * mask_pixels[col, row] / 255)
             grad_pixels[col, row] = (r, g, b, a)
+    return grad_img
 
-    # 用图像自身的 alpha 通道做合成（保留渐变透明度）
+
+def _draw_gradient_rounded_bg(draw, x1, y1, x2, y2, radius, start_color, end_color):
+    """绘制水平渐变圆角背景（从缓存获取预渲染图像，逐帧仅 paste）"""
+    w, h = x2 - x1, y2 - y1
+    if w <= 0 or h <= 0:
+        return
+    grad_img = _make_gradient_bg(w, h, radius, start_color, end_color)
     draw._image.paste(grad_img, (x1, y1), grad_img)
 
 
