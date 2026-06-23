@@ -165,14 +165,11 @@ def _draw_gradient_rounded_bg(draw, x1, y1, x2, y2, radius, start_color, end_col
 
 
 def add_subtitle(frame, text, original_text="", enable_subtitle=True, subtitle_style=None):
-    """在视频帧上叠加字幕（支持双语）
+    """在视频帧上叠加字幕（支持双语）+ Overlay 标题/分享人
 
     纯函数，不依赖外部状态。
-    返回加了字幕的 BGR 格式帧。
+    主标题和分享人独立于字幕，无字幕时也会渲染。
     """
-    if not enable_subtitle or not text:
-        return frame
-
     style = subtitle_style or {}
     color_name = style.get("color", "黄色（推荐）")
     main_color_rgb = SUBTITLE_COLORS.get(color_name, (255, 235, 59))
@@ -309,18 +306,19 @@ def add_subtitle(frame, text, original_text="", enable_subtitle=True, subtitle_s
             draw.multiline_text((orig_x, orig_y), orig_wrapped, font=orig_font, fill=gray_color,
                                 stroke_width=orig_bold, stroke_fill=(0, 0, 0), align="center")
 
-    # ===== 译文背景框 + 文字（始终在底部） =====
-    if bg_enabled:
-        padding = int(font_size * 0.3)
-        bg_box = [x - padding, y - padding, x + text_w + padding, y + text_h + padding]
-        draw.rectangle(bg_box, fill=(0, 0, 0, 140))
+    # ===== 译文背景框 + 文字（仅当字幕启用且有文本时） =====
+    if enable_subtitle and text:
+        if bg_enabled:
+            padding = int(font_size * 0.3)
+            bg_box = [x - padding, y - padding, x + text_w + padding, y + text_h + padding]
+            draw.rectangle(bg_box, fill=(0, 0, 0, 140))
 
-    draw.multiline_text((x + offset, y + offset), wrapped_text, font=font, fill=shadow_color,
-                        stroke_width=bold_width, stroke_fill=shadow_color, align="center")
-    draw.multiline_text((x - offset, y - offset), wrapped_text, font=font, fill=shadow_color,
-                        stroke_width=bold_width, stroke_fill=shadow_color, align="center")
-    draw.multiline_text((x, y), wrapped_text, font=font, fill=main_color_rgb, stroke_width=bold_width,
-                        stroke_fill=main_color_rgb, align="center")
+        draw.multiline_text((x + offset, y + offset), wrapped_text, font=font, fill=shadow_color,
+                            stroke_width=bold_width, stroke_fill=shadow_color, align="center")
+        draw.multiline_text((x - offset, y - offset), wrapped_text, font=font, fill=shadow_color,
+                            stroke_width=bold_width, stroke_fill=shadow_color, align="center")
+        draw.multiline_text((x, y), wrapped_text, font=font, fill=main_color_rgb, stroke_width=bold_width,
+                            stroke_fill=main_color_rgb, align="center")
 
     # ========================================================
     # 视频主标题（译文下方 1 行字高，靠左对齐，黑色字体 + 黄色圆角背景）

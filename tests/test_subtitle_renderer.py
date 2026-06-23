@@ -342,16 +342,17 @@ class TestOverlayRendering:
         assert out.shape == frame.shape  # 尺寸不变
         assert not np.array_equal(out, frame)  # 但内容变了（有字幕文字）
 
-    def test_overlay_title_not_rendered_when_disabled(self):
-        """enable_subtitle=False 时完全不渲染"""
+    def test_overlay_renders_without_subtitle(self):
+        """overlay 独立于字幕：enable_subtitle=False 时仍渲染标题和分享人"""
         frame = _make_test_frame(1280, 720)
-        out = add_subtitle(frame, "译文", original_text="",
+        out = add_subtitle(frame, "", original_text="",
                           enable_subtitle=False,
                           subtitle_style={
                               "overlay_title": "测试标题",
                               "overlay_sharer": "张三",
                           })
-        assert np.array_equal(out, frame)  # 完全不变
+        # overlay 渲染了内容，帧不应与原始相同
+        assert not np.array_equal(out, frame), "overlay 应在字幕关闭时仍渲染"
 
     def test_both_overlays_together(self):
         """两个 overlay 同时渲染不出错"""
