@@ -281,7 +281,15 @@ class VideoProcessorMixin:
         if orig_fps == 0 or np.isnan(orig_fps):
             orig_fps = self.fps
 
+        # 获取视频总时长（用于进度条 + 章节）
+        total_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+        total_duration = total_frames / orig_fps if orig_fps > 0 else 0.0
+
         frame_count, last_target_center_x, sub_cursor = 0, None, 0
+
+        # 将时间和章节注入 style dict（渲染器每帧读取）
+        self.subtitle_style["_total_duration"] = total_duration
+        self.subtitle_style["_chapters"] = getattr(self, "chapters", [])
 
         # 快速预览：最多处理的帧数
         max_frames = 0
@@ -294,6 +302,7 @@ class VideoProcessorMixin:
                 break
 
             current_time = frame_count / orig_fps
+            self.subtitle_style["_current_time"] = current_time
             if self.quick_preview_sec > 0 and current_time > self.quick_preview_sec:
                 break
 

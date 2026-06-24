@@ -40,7 +40,8 @@ class VideoProcessThread(QThread, AudioPipelineMixin, VideoProcessorMixin):
                  highlight_enabled=False,
                  highlight_start_sec=0,
                  highlight_dur_sec=3,
-                 bitrate_mbps=4):
+                 bitrate_mbps=4,
+                 chapters=None):
         super().__init__()
         self.input_source = input_source
         self.is_vertical = is_vertical
@@ -54,6 +55,7 @@ class VideoProcessThread(QThread, AudioPipelineMixin, VideoProcessorMixin):
         self.highlight_enabled = highlight_enabled
         self.highlight_start_sec = highlight_start_sec
         self.highlight_dur_sec = highlight_dur_sec
+        self.chapters = chapters or []
         self.upload_configs = upload_configs
         self.trim_start = trim_start
         self.trim_end = trim_end

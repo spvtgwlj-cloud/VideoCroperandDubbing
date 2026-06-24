@@ -127,6 +127,102 @@ class MainWindow(QMainWindow):
 
         left_layout.addLayout(preview_row, 2)
 
+        # ---- 章节标记（可折叠，默认折叠） ----
+        self.chapter_group = QGroupBox("📑 章节标记")
+        self.chapter_group.setCheckable(True)
+        self.chapter_group.setChecked(False)
+        self.chapter_group.setStyleSheet(
+            "QGroupBox { color: #7C7CFF; border: 1px solid #2A2A55;"
+            " border-radius: 8px; margin-top: 14px; padding-top: 16px;"
+            " background-color: #14142B; font-size: 14px; font-weight: bold; }"
+            "QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 6px; }"
+            "QGroupBox::indicator {"
+            " width: 16px; height: 16px; border-radius: 4px;"
+            " border: 2px solid #3A3A6A; background: #101025;"
+            "}"
+            "QGroupBox::indicator:checked {"
+            " background-color: #2979FF; border-color: #2979FF;"
+            "}"
+        )
+        chapter_layout = QVBoxLayout(self.chapter_group)
+        chapter_layout.setContentsMargins(8, 18, 8, 8)
+        chapter_layout.setSpacing(4)
+
+        self.chapter_table = QGridLayout()
+        self.chapter_table.setSpacing(3)
+        self.chapter_table.setContentsMargins(0, 0, 0, 0)
+        self.chapter_rows = []
+
+        QSpinBox_STYLE = (
+            "QSpinBox { background-color: #101025; color: #CCCCDD;"
+            " border: 1px solid #2A2A5A; border-radius: 4px; padding: 2px 4px; font-size: 11px; }"
+        )
+
+        def _add_chapter_row(time_val=0, title_val=""):
+            row_idx = len(self.chapter_rows)
+            time_spin = QSpinBox()
+            time_spin.setRange(0, 99999)
+            time_spin.setSuffix("s")
+            time_spin.setValue(time_val)
+            time_spin.setStyleSheet(QSpinBox_STYLE)
+            time_spin.setFixedWidth(70)
+
+            title_edit = QLineEdit()
+            title_edit.setPlaceholderText("章节标题")
+            title_edit.setMaxLength(20)
+            title_edit.setText(title_val)
+            title_edit.setStyleSheet(
+                "QLineEdit { background-color: #101025; color: #CCCCDD;"
+                " border: 1px solid #2A2A5A; border-radius: 4px; padding: 2px 6px; font-size: 11px; }"
+            )
+
+            del_btn = QPushButton("✕")
+            del_btn.setFixedSize(24, 24)
+            del_btn.setStyleSheet(
+                "QPushButton { background-color: #2A1A1A; color: #FF5252; border: none;"
+                " border-radius: 3px; font-size: 10px; }"
+                "QPushButton:hover { background-color: #4A1A1A; }"
+            )
+            del_btn.clicked.connect(lambda: _remove_chapter_row(row_idx))
+
+            self.chapter_rows.append((time_spin, title_edit, del_btn))
+            self.chapter_table.addWidget(time_spin, row_idx, 0)
+            self.chapter_table.addWidget(title_edit, row_idx, 1)
+            self.chapter_table.addWidget(del_btn, row_idx, 2)
+
+        def _remove_chapter_row(idx):
+            if len(self.chapter_rows) <= 1:
+                return
+            # 保存现有数据
+            saved = [(r[0].value(), r[1].text()) for i, r in enumerate(self.chapter_rows) if i != idx]
+            # 清空所有 widget
+            while self.chapter_rows:
+                row = self.chapter_rows.pop()
+                for w in row:
+                    self.chapter_table.removeWidget(w)
+                    w.deleteLater()
+            # 重建
+            for t, title in saved:
+                _add_chapter_row(t, title)
+
+        self._add_chapter_row = _add_chapter_row
+
+        for _ in range(3):
+            _add_chapter_row()
+
+        chapter_layout.addLayout(self.chapter_table)
+
+        add_ch_btn = QPushButton("+ 添加章节")
+        add_ch_btn.setStyleSheet(
+            "QPushButton { background-color: #1A1A3A; color: #7C7CFF; border: 1px dashed #2A2A5A;"
+            " border-radius: 4px; padding: 4px; font-size: 11px; }"
+            "QPushButton:hover { background-color: #2A2A5A; }"
+        )
+        add_ch_btn.clicked.connect(lambda: self._add_chapter_row())
+        chapter_layout.addWidget(add_ch_btn)
+
+        left_layout.addWidget(self.chapter_group, 0)
+
         # 波形可视化（缩小高度）
         self.waveform_label = QLabel("🎵 音频波形 (仅展示前60秒)")
         self.waveform_label.setAlignment(Qt.AlignCenter)
@@ -982,6 +1078,7 @@ class MainWindow(QMainWindow):
             highlight_enabled=self.chk_highlight.isChecked(),
             highlight_start_sec=self.highlight_start_spin.value(),
             highlight_dur_sec=self.highlight_dur_spin.value(),
+            chapters=self._collect_chapters(),
         )
 
         self.thread.update_frame.connect(self.update_preview)
@@ -990,6 +1087,19 @@ class MainWindow(QMainWindow):
         self.thread.progress_changed.connect(self.progress_bar.setValue)
         self.thread.batch_finished.connect(self.show_batch_summary)
         self.thread.start()
+
+    def _collect_chapters(self):
+        """收集章节数据：未勾选或标题为空时返回空列表"""
+        if not self.chapter_group.isChecked():
+            return []
+        chapters = []
+        for row in self.chapter_rows:
+            t = row[0].value()
+            title = row[1].text().strip()
+            if title:
+                chapters.append({"start": t, "title": title})
+        chapters.sort(key=lambda c: c["start"])
+        return chapters
 
     def reset_processing_state(self):
         if self.thread:
@@ -1074,6 +1184,9 @@ class MainWindow(QMainWindow):
             "highlight_enabled": self.chk_highlight.isChecked(),
             "highlight_start_sec": self.highlight_start_spin.value(),
             "highlight_dur_sec": self.highlight_dur_spin.value(),
+            "chapters_enabled": self.chapter_group.isChecked(),
+            "chapters": [{"start": r[0].value(), "title": r[1].text().strip()}
+                         for r in self.chapter_rows],
         }
         file_path, _ = QFileDialog.getSaveFileName(self, "保存配置模板", "", "JSON 文件 (*.json)")
         if not file_path:
@@ -1173,6 +1286,21 @@ class MainWindow(QMainWindow):
         self.highlight_start_spin.setValue(config.get("highlight_start_sec", 0))
         self.highlight_dur_spin.setEnabled(hl_enabled)
         self.highlight_dur_spin.setValue(config.get("highlight_dur_sec", 3))
+
+        # 章节标记
+        ch_enabled = config.get("chapters_enabled", False)
+        self.chapter_group.setChecked(ch_enabled)
+        saved_chapters = config.get("chapters", [])
+        if saved_chapters:
+            # 清空默认行
+            while self.chapter_rows:
+                row = self.chapter_rows.pop()
+                for w in row:
+                    self.chapter_table.removeWidget(w)
+                    w.deleteLater()
+            # 重建
+            for ch in saved_chapters:
+                self._add_chapter_row(ch.get("start", 0), ch.get("title", ""))
 
         self.log(f"📂 配置已加载: {file_path}")
 
