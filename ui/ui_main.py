@@ -454,10 +454,10 @@ class MainWindow(QMainWindow):
         row8_right.addWidget(QLabel("字号"))
         self.sub_font_slider = QSlider(Qt.Horizontal)
         self.sub_font_slider.setRange(30, 100)
-        self.sub_font_slider.setValue(55)  # 0.055 = 5.5%
+        self.sub_font_slider.setValue(48)  # 0.048 = 4.8%
         self.sub_font_slider.setTickPosition(QSlider.TicksBelow)
         self.sub_font_slider.setTickInterval(10)
-        self.sub_font_label = QLabel("5.5%")
+        self.sub_font_label = QLabel("4.8%")
         self.sub_font_slider.valueChanged.connect(
             lambda v: self.sub_font_label.setText(f"{v / 10:.1f}%")
         )
@@ -1236,7 +1236,7 @@ class MainWindow(QMainWindow):
 
         self.chk_subtitle.setChecked(config.get("enable_subtitle", True))
         _restore_combo(self.sub_color_combo, "subtitle_color")
-        self.sub_font_slider.setValue(config.get("subtitle_font_size", 55))
+        self.sub_font_slider.setValue(config.get("subtitle_font_size", 48))
         self.chk_sub_bg.setChecked(config.get("subtitle_bg", False))
         self.chk_bilingual.setChecked(config.get("bilingual", False))
         self.subtitle_offset_spin.setValue(config.get("subtitle_offset_ms", 0))

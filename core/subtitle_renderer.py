@@ -176,7 +176,7 @@ def add_subtitle(frame, text, original_text="", enable_subtitle=True, subtitle_s
     style = subtitle_style or {}
     color_name = style.get("color", "黄色（推荐）")
     main_color_rgb = SUBTITLE_COLORS.get(color_name, (255, 235, 59))
-    font_ratio = style.get("font_size", 0.055)
+    font_ratio = style.get("font_size", 0.048)  # 缩小1号（0.055→0.048）
     bg_enabled = style.get("bg_enabled", False)
     portrait_margin = style.get("portrait_margin", 0.25)
     landscape_margin = style.get("landscape_margin", 0.15)
@@ -343,8 +343,10 @@ def add_subtitle(frame, text, original_text="", enable_subtitle=True, subtitle_s
         title_w = title_bbox[2] - title_bbox[0]
         title_h = title_bbox[3] - title_bbox[1]
 
-        # 位置：译文下方 1 行字高，居中放置
-        title_y = y + text_h + max(4, int(font_size * GAP_FONT_LINES))
+        # 位置：译文下方 1 行字高，横屏时额外上移防止与进度条重叠
+        title_gap = 25
+        title_y = y + text_h + title_gap
+        title_y = y + text_h + title_gap
         title_x = (img_w - title_w) // 2
 
         # 黄色渐变圆角背景（左→右：透明 → #FFEB3B 86% opacity）
@@ -422,7 +424,13 @@ def add_subtitle(frame, text, original_text="", enable_subtitle=True, subtitle_s
     # 章节进度条（底部：底板 + 章节时间轴 + 已播灰色遮罩 + 播放头）
     # ========================================================
     if chapters and total_duration > 0:
-        ch_font_size = max(10, int(font_size * 0.68))
+        # 竖屏/横屏分别控制字号和栏高
+        if is_landscape:
+            ch_font_size = max(9, int(font_size * 0.38))
+            bar_h = int(base_dim * 0.028)  # 横屏：固定窄条 ~30px
+        else:
+            ch_font_size = max(10, int(font_size * 0.68))
+            bar_h = None  # 竖屏：自动计算
         ch_font_path = font_path or get_chinese_font()
         ch_font = ImageFont.truetype(ch_font_path, ch_font_size) if ch_font_path else font
 
@@ -431,8 +439,9 @@ def add_subtitle(frame, text, original_text="", enable_subtitle=True, subtitle_s
             bbox = draw.textbbox((0, 0), ch["title"], font=ch_font)
             max_ch_h = max(max_ch_h, bbox[3] - bbox[1])
 
-        text_pad = int(ch_font_size * 0.4)
-        bar_h = max_ch_h + text_pad * 2 + 8
+        text_pad = int(ch_font_size * 0.3)
+        if bar_h is None:
+            bar_h = max_ch_h + text_pad * 2 + 8  # 竖屏：自动计算
         bar_y = max(0, img_h - bar_h)
         margin_x = int(img_w * 0.03)
 
