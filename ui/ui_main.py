@@ -132,10 +132,10 @@ class MainWindow(QMainWindow):
         self.chapter_group.setCheckable(True)
         self.chapter_group.setChecked(False)
         self.chapter_group.setStyleSheet(
-            "QGroupBox { color: #7C7CFF; border: 1px solid #2A2A55;"
-            " border-radius: 8px; margin-top: 14px; padding-top: 16px;"
-            " background-color: #14142B; font-size: 14px; font-weight: bold; }"
-            "QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 6px; }"
+            "QGroupBox { color: #7C7CFF; border: none;"
+            " border-radius: 0; margin-top: 8px; padding-top: 2px;"
+            " background-color: transparent; font-size: 14px; font-weight: bold; }"
+            "QGroupBox::title { subcontrol-origin: margin; left: 0px; padding: 0 4px 0 0; }"
             "QGroupBox::indicator {"
             " width: 16px; height: 16px; border-radius: 4px;"
             " border: 2px solid #3A3A6A; background: #101025;"

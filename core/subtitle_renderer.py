@@ -418,11 +418,11 @@ def add_subtitle(frame, text, original_text="", enable_subtitle=True, subtitle_s
         )
 
     # ========================================================
-    # 章节进度条（底部，文字在上，进度条在下，透视叠加效果）
+    # ========================================================
+    # 章节进度条（底部：底板 + 章节时间轴 + 已播灰色遮罩 + 播放头）
     # ========================================================
     if chapters and total_duration > 0:
-        # 章节文字使用中文字幕字体大小
-        ch_font_size = font_size
+        ch_font_size = max(10, int(font_size * 0.68))
         ch_font_path = font_path or get_chinese_font()
         ch_font = ImageFont.truetype(ch_font_path, ch_font_size) if ch_font_path else font
 
@@ -432,69 +432,53 @@ def add_subtitle(frame, text, original_text="", enable_subtitle=True, subtitle_s
             max_ch_h = max(max_ch_h, bbox[3] - bbox[1])
 
         text_pad = int(ch_font_size * 0.4)
-        line_h = 5
-        bar_h = max_ch_h + text_pad * 2 + line_h + 10
-        bar_y = img_h - bar_h
+        bar_h = max_ch_h + text_pad * 2 + 8
+        bar_y = max(0, img_h - bar_h)
         margin_x = int(img_w * 0.03)
 
-        progress = min(max(current_time / total_duration, 0.0), 1.0)
         bar_area_l = margin_x
         bar_area_r = img_w - margin_x
         bar_area_w = bar_area_r - bar_area_l
 
-        # 文字层（进度条上方）
+        # 1. 底板 + 章节文字（右侧未播区域：黑底 + 清晰章节文字）
+        draw.rectangle([0, bar_y, img_w, img_h], fill=(0, 0, 0, 170))
         text_y = bar_y + text_pad
-        line_y = text_y + max_ch_h + text_pad  # 进度条在文字下方
-
         prev_end_x = bar_area_l
         for i, ch in enumerate(chapters):
             ratio = max(min(ch["start"] / total_duration, 1.0), 0.0)
             ch_x = bar_area_l + int(bar_area_w * ratio)
-
             ch_text = ch["title"]
             ch_bbox = draw.textbbox((0, 0), ch_text, font=ch_font)
             ch_w = ch_bbox[2] - ch_bbox[0]
 
-            if i > 0 and ch_x - ch_w // 2 < prev_end_x:
-                ch_x = prev_end_x + ch_w // 2
-            text_start = max(margin_x, ch_x - ch_w // 2)
-            text_start = min(text_start, img_w - ch_w - margin_x)
-            prev_end_x = text_start + ch_w + 6
+            # 文字左对齐于章节开始时间（仅越界时修正）
+            text_start = ch_x
+            if text_start + ch_w > img_w - margin_x:
+                text_start = img_w - margin_x - ch_w
+            if text_start < margin_x:
+                text_start = margin_x
+            prev_end_x = text_start + ch_w
 
-            # 竖线：从文字底部连到进度条
-            draw.line([(ch_x, text_y + max_ch_h + 2), (ch_x, line_y)], fill=(255, 255, 255, 80), width=1)
-
-            # 当前章节高亮
-            next_start = chapters[i + 1]["start"] if i + 1 < len(chapters) else total_duration
-            is_current = ch["start"] <= current_time < next_start
-            if is_current:
-                hl_pad = max(3, int(ch_font_size * 0.15))
-                hl_top = text_y - hl_pad
-                hl_bot = text_y + max_ch_h + hl_pad
-                draw.rounded_rectangle(
-                    [text_start - hl_pad, hl_top, text_start + ch_w + hl_pad, hl_bot],
-                    radius=4, fill=(0, 188, 212, 90),
-                )
-
-            text_color = (0, 188, 212) if is_current else (180, 180, 190)
             draw.multiline_text(
                 (text_start, text_y), ch_text, font=ch_font,
-                fill=text_color, align="left",
+                fill=(200, 200, 210), align="left",
             )
 
-        # 背景底板（半透明深色，盖在进度条下方）
-        draw.rectangle([0, bar_y, img_w, img_h], fill=(0, 0, 0, 140))
-
-        # 进度条（底板之上）
-        draw.rectangle([bar_area_l, line_y, bar_area_r, line_y + line_h], fill=(255, 255, 255, 40))
+        # 2. 已播放遮罩：RGBA 图层确保透明度正确合成
+        progress = min(max(current_time / total_duration, 0.0), 1.0)
         played_x = bar_area_l + int(bar_area_w * progress)
         if played_x > bar_area_l:
-            draw.rectangle([bar_area_l, line_y, played_x, line_y + line_h], fill=(0, 188, 212, 230))
-        dot_r = max(4, int(ch_font_size * 0.13))
-        draw.ellipse(
-            [played_x - dot_r, line_y - dot_r + 2, played_x + dot_r, line_y + dot_r + 2],
-            fill=(0, 188, 212),
-        )
+            overlay_w = played_x
+            overlay_h = bar_h
+            overlay = Image.new('RGBA', (overlay_w, overlay_h), (0, 0, 0, 0))
+            overlay_draw = ImageDraw.Draw(overlay)
+            # 亮灰遮罩，与黑底形成清晰对比
+            overlay_draw.rectangle([0, 0, overlay_w, overlay_h], fill=(90, 95, 110, 140))
+            pil_im.paste(overlay, (0, bar_y), overlay)
+
+        # 3. 播放头竖线
+        draw = ImageDraw.Draw(pil_im)
+        draw.line([(played_x, bar_y), (played_x, img_h)], fill=(0, 188, 212), width=3)
     elif total_duration > 0:
         # 无章节时：仅底部细条进度条
         progress = min(max(current_time / total_duration, 0.0), 1.0)
