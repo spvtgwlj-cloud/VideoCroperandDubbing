@@ -83,6 +83,7 @@ class AudioPipelineMixin:
     def _run_cosyvoice_tts(self, seg, temp_tts_file, voice_id):
         """尝试 CosyVoice TTS（3 次重试），返回 (success, error_msg)"""
         TTS_URL = "https://dashscope.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer"
+        last_error = ""
         for attempt in range(3):
             try:
                 safe_text = "，" + seg["text"] if "中文" in self.target_lang else ", " + seg["text"]
@@ -98,14 +99,19 @@ class AudioPipelineMixin:
                     timeout=30,
                 )
                 if resp.status_code != 200:
-                    raise Exception(f"HTTP {resp.status_code}: {resp.text}")
-                output_audio = resp.json().get("output", {}).get("audio", {})
+                    # 截取前 300 字符避免日志过长
+                    detail = resp.text[:300]
+                    raise Exception(f"HTTP {resp.status_code}: {detail}")
+                resp_json = resp.json()
+                output_audio = resp_json.get("output", {}).get("audio", {})
                 if output_audio.get("data"):
                     audio_data = base64.b64decode(output_audio["data"])
                 elif output_audio.get("url"):
                     audio_data = requests.get(output_audio["url"], timeout=30).content
                 else:
-                    raise Exception("无音频数据")
+                    # 检查是否有错误信息
+                    err_msg = resp_json.get("output", {}).get("message", "") or resp_json.get("message", "")
+                    raise Exception(f"无音频数据，API 返回: {err_msg[:200]}" if err_msg else "无音频数据，voice_id 可能无效")
                 with open(temp_tts_file, "wb") as f:
                     f.write(audio_data)
                 return True, ""
@@ -113,7 +119,7 @@ class AudioPipelineMixin:
                 last_error = str(e)
                 if attempt < 2:
                     time.sleep(2)
-        return False, last_error
+        return False, f"[3次重试均失败] {last_error}"
 
     def _run_edge_tts(self, seg, temp_tts_file, voice_name, seg_index):
         """尝试 Edge-TTS 合成，返回 (success, error_msg)"""
@@ -289,7 +295,7 @@ class AudioPipelineMixin:
         classifier = EncoderClassifier.from_hparams(
             source="speechbrain/spkrec-ecapa-voxceleb",
             savedir="pretrained_models/spkrec-ecapa-voxceleb",
-            run_opts={"device": "mps" if _mps_available else "cpu"},
+            run_opts={"device": "cpu"},
         )
         embeddings = []
         total_audio_ms = len(orig_audio_segment)
@@ -381,9 +387,6 @@ class AudioPipelineMixin:
             for config in self.upload_configs:
                 up_path = config["path"]
                 up_spk_id = config["spk_id"]
-                if up_spk_id not in ref_prompts:
-                    self.log_msg.emit(f"⚠️ 视频中未检测到 角色 {up_spk_id}，已忽略对应的上传音频。")
-                    continue
                 proc_audio = os.path.join(self.output_dir, f"processed_upload_spk{up_spk_id}.wav")
                 try:
                     subprocess.run(
@@ -394,7 +397,7 @@ class AudioPipelineMixin:
                     ref_prompts[up_spk_id] = {"text": "User Uploaded Voice", "audio_path": proc_audio}
                     self.log_msg.emit(f"✅ 角色 {up_spk_id} 成功绑定本地上传音频！")
                 except Exception as e:
-                    self.log_msg.emit(f"❌ 处理上传音频失败: {e}，该角色将回退使用视频提取原声。")
+                    self.log_msg.emit(f"❌ 处理上传音频失败: {e}，该角色将无法使用声音克隆")
 
         # ---- 翻译（或 SRT 驱动模式） ----
         if srt_timeline:
@@ -520,11 +523,24 @@ class AudioPipelineMixin:
 
         speaker_voices = {}
 
+        self.log_msg.emit(f"🎙️ 共检测到 {len(ref_prompts)} 个角色需要创建音色: {list(ref_prompts.keys())}")
         for spk_id, ref in ref_prompts.items():
             try:
+                ref_duration_ms = len(AudioSegment.from_file(ref["audio_path"]))
+                self.log_msg.emit(
+                    f"🎵 角色 {spk_id}: 参考音频 {ref_duration_ms}ms, "
+                    f"文本: {ref['text'][:50]}"
+                )
                 speaker_voices[spk_id] = self.create_cloned_voice(ref["audio_path"], ref["text"], spk_id)
+                self.log_msg.emit(f"✅ 角色 {spk_id} 音色注册成功: {speaker_voices[spk_id]}")
             except Exception as e:
                 self.log_msg.emit(f"❌ 角色 {spk_id} 创建音色失败: {e} (将使用兜底方案)")
+
+        if not speaker_voices:
+            self.log_msg.emit(
+                "⚠️ 所有角色音色创建均失败，CosyVoice 将不可用，"
+                "请检查: 1) API Key 有效 2) 参考音频格式正确 3) 网络畅通"
+            )
 
         total_tts = len(self.subtitles_timeline)
         for i, seg in enumerate(self.subtitles_timeline):
@@ -558,14 +574,18 @@ class AudioPipelineMixin:
                 if not success and voice_id:
                     self.log_msg.emit(f"⚠️ 第 {i + 1} 句 Edge-TTS 失败 ({last_error})，回退至 CosyVoice...")
                     success, last_error = self._run_cosyvoice_tts(seg, temp_tts_file, voice_id)
+                elif not success and not voice_id:
+                    self.log_msg.emit(f"⚠️ 第 {i + 1} 句 Edge-TTS 失败，且无可用克隆音色，跳过 CosyVoice")
             else:
                 # 方案 A：CosyVoice（优先）
                 if voice_id:
                     success, last_error = self._run_cosyvoice_tts(seg, temp_tts_file, voice_id)
+                    if not success:
+                        self.log_msg.emit(f"⚠️ 第 {i + 1} 句克隆失败 ({last_error})，回退至 Edge-TTS...")
+                else:
+                    self.log_msg.emit(f"⚠️ 第 {i + 1} 句无可用克隆音色（voice_id 为空），跳过 CosyVoice")
                 # 方案 B：Edge-TTS（回退）
                 if not success:
-                    if last_error:
-                        self.log_msg.emit(f"⚠️ 第 {i + 1} 句克隆失败 ({last_error})，回退至 Edge-TTS...")
                     success, last_error = self._run_edge_tts(seg, temp_tts_file, seg_edge_voice, i)
 
             # 方案 C：原声兜底
