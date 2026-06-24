@@ -459,6 +459,10 @@ def add_subtitle(frame, text, original_text="", enable_subtitle=True, subtitle_s
                 text_start = margin_x
             prev_end_x = text_start + ch_w
 
+            # 章节起始位置小竖线标记
+            draw.line([(ch_x, text_y + max_ch_h + 4), (ch_x, bar_y + bar_h - 4)],
+                      fill=(255, 255, 255, 60), width=1)
+
             draw.multiline_text(
                 (text_start, text_y), ch_text, font=ch_font,
                 fill=(200, 200, 210), align="left",
