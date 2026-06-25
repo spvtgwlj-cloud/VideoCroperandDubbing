@@ -10,7 +10,7 @@ from PyQt5.QtGui import QPainter, QColor, QPixmap
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QLabel, QPushButton, QComboBox, QLineEdit, QTextEdit,
-    QGroupBox, QRadioButton, QSpinBox, QFileDialog, QGridLayout,
+    QGroupBox, QRadioButton, QButtonGroup, QSpinBox, QFileDialog, QGridLayout,
     QCheckBox, QProgressBar, QSlider, QMessageBox, QScrollArea,
 )
 from PyQt5.QtCore import Qt
@@ -304,14 +304,23 @@ class MainWindow(QMainWindow):
         config_layout.setSpacing(10)
         config_layout.setContentsMargins(20, 25, 20, 20)
 
-        # ---- Row 0: 平台预设 ----
-        config_layout.addWidget(QLabel("平台预设:"), 0, 0)
-        self.preset_combo = QComboBox()
-        preset_names = list(PLATFORM_PRESETS.keys())
-        self.preset_combo.addItems(preset_names)
-        self.preset_combo.setCurrentText("手动配置")
-        self.preset_combo.currentTextChanged.connect(self.on_preset_changed)
-        config_layout.addWidget(self.preset_combo, 0, 1, 1, 3)
+        # ---- Row 0: 平台预设 + 多选 ----
+        config_layout.addWidget(QLabel("输出平台:"), 0, 0)
+        # 平台多选横排（直接展示，用户勾选即生效）
+        platform_row = QHBoxLayout()
+        platform_row.setSpacing(36)  # 3 个汉字宽度
+        self.platform_checks = {}
+        for pname in list(PLATFORM_PRESETS.keys()):
+            if pname == "手动配置":
+                continue
+            chk = QCheckBox(pname.replace(" / ", "/"))
+            chk.setChecked(pname == "抖音 / 视频号")
+            chk.setStyleSheet("color: #C0C0E0; font-size: 11px;")
+            chk.toggled.connect(lambda checked, p=pname: self._on_platform_toggled(p, checked))
+            platform_row.addWidget(chk)
+            self.platform_checks[pname] = chk
+        platform_row.addStretch()
+        config_layout.addLayout(platform_row, 0, 1, 1, 3)
 
         # ---- Row 1: 本地视频 ----
         config_layout.addWidget(QLabel("本地视频:"), 1, 0)
@@ -365,12 +374,17 @@ class MainWindow(QMainWindow):
 
         # ---- Row 5: 画面输出 ----
         config_layout.addWidget(QLabel("画面输出:"), 5, 0)
-        self.radio_horizontal = QRadioButton("横屏 (保持原比例)")
-        self.radio_vertical = QRadioButton("竖屏 (InsightFace 智能追踪)")
-        self.radio_vertical.setChecked(True)
+        self.chk_horizontal = QCheckBox("横屏 (保持原比例)")
+        self.chk_vertical = QCheckBox("竖屏 (InsightFace 智能追踪)")
+        self.chk_vertical.setChecked(True)
+        self.orient_group = QButtonGroup()
+        self.orient_group.addButton(self.chk_horizontal)
+        self.orient_group.addButton(self.chk_vertical)
+        self.orient_group.setExclusive(True)
         lay_radio = QHBoxLayout()
-        lay_radio.addWidget(self.radio_horizontal)
-        lay_radio.addWidget(self.radio_vertical)
+        lay_radio.setSpacing(36)
+        lay_radio.addWidget(self.chk_horizontal)
+        lay_radio.addWidget(self.chk_vertical)
         lay_radio.addStretch()
         config_layout.addLayout(lay_radio, 5, 1, 1, 3)
 
@@ -402,8 +416,8 @@ class MainWindow(QMainWindow):
         res_spins.addStretch()
         config_layout.addLayout(res_spins, 6, 1, 1, 3)
         # 横屏时置灰分辨率控件
-        self.radio_horizontal.toggled.connect(self._toggle_resolution_controls)
-        self.radio_vertical.toggled.connect(self._toggle_resolution_controls)
+        self.chk_horizontal.toggled.connect(self._toggle_resolution_controls)
+        self.chk_vertical.toggled.connect(self._toggle_resolution_controls)
 
         # ---- Row 7: 字幕 + 音唇同步（右侧紧凑对齐） ----
         config_layout.addWidget(QLabel("字幕配置:"), 7, 0)
@@ -436,7 +450,7 @@ class MainWindow(QMainWindow):
         # 左侧组合：颜色下拉 + 背景框 + 双语字幕
         row8_left = QHBoxLayout()
         row8_left.setContentsMargins(0, 0, 0, 0)
-        row8_left.setSpacing(12)
+        row8_left.setSpacing(36)
         self.sub_color_combo = QComboBox()
         self.sub_color_combo.addItems(list(SUBTITLE_COLORS.keys()))
         row8_left.addWidget(self.sub_color_combo)
@@ -454,7 +468,8 @@ class MainWindow(QMainWindow):
         row8_right.addWidget(QLabel("字号"))
         self.sub_font_slider = QSlider(Qt.Horizontal)
         self.sub_font_slider.setRange(30, 100)
-        self.sub_font_slider.setValue(48)  # 0.048 = 4.8%
+        self.sub_font_slider.setValue(48)
+        self.sub_font_slider.setFixedWidth(120)
         self.sub_font_slider.setTickPosition(QSlider.TicksBelow)
         self.sub_font_slider.setTickInterval(10)
         self.sub_font_label = QLabel("4.8%")
@@ -463,6 +478,7 @@ class MainWindow(QMainWindow):
         )
         row8_right.addWidget(self.sub_font_slider, 1)
         row8_right.addWidget(self.sub_font_label)
+        row8_right.addSpacing(12)
         config_layout.addLayout(row8_right, 8, 2, 1, 2)
 
         # ---- Row 9: 字幕导出 ----
@@ -473,14 +489,19 @@ class MainWindow(QMainWindow):
 
         # ---- Row 10: 字幕文件源 ----
         config_layout.addWidget(QLabel("字幕来源:"), 10, 0)
-        self.radio_sub_auto = QRadioButton("系统自动生成")
-        self.radio_sub_auto.setChecked(True)
-        self.radio_sub_manual = QRadioButton("导入外部字幕文件")
-        self.radio_sub_auto.toggled.connect(self._toggle_subtitle_source)
-        self.radio_sub_manual.toggled.connect(self._toggle_subtitle_source)
+        self.chk_sub_auto = QCheckBox("系统自动生成")
+        self.chk_sub_auto.setChecked(True)
+        self.chk_sub_manual = QCheckBox("导入外部字幕文件")
+        self.chk_sub_auto.toggled.connect(self._toggle_subtitle_source)
+        self.chk_sub_manual.toggled.connect(self._toggle_subtitle_source)
+        self.sub_src_group = QButtonGroup()
+        self.sub_src_group.addButton(self.chk_sub_auto)
+        self.sub_src_group.addButton(self.chk_sub_manual)
+        self.sub_src_group.setExclusive(True)
         sub_src_layout = QHBoxLayout()
-        sub_src_layout.addWidget(self.radio_sub_auto)
-        sub_src_layout.addWidget(self.radio_sub_manual)
+        sub_src_layout.setSpacing(36)
+        sub_src_layout.addWidget(self.chk_sub_auto)
+        sub_src_layout.addWidget(self.chk_sub_manual)
         sub_src_layout.addStretch()
         config_layout.addLayout(sub_src_layout, 10, 1, 1, 3)
 
@@ -671,33 +692,27 @@ class MainWindow(QMainWindow):
         self.toggle_edge_tts_options()
 
     # -------- 预设切换 --------
-    def on_preset_changed(self, preset_name):
-        preset = PLATFORM_PRESETS.get(preset_name)
-        if not preset or preset_name == "手动配置":
-            return
-
-        is_vertical = preset["is_vertical"]
-        if is_vertical is True:
-            self.radio_vertical.setChecked(True)
-        elif is_vertical is False:
-            self.radio_horizontal.setChecked(True)
-
-        codec = preset["codec"]
-        if codec:
-            idx = self.codec_combo.findText(codec)
-            if idx >= 0:
-                self.codec_combo.setCurrentIndex(idx)
-
-        bitrate = preset.get("bitrate", 4)
-        if bitrate > 0:
-            self.bitrate_spin.setValue(bitrate)
-
-        ow, oh = preset.get("ow", 0), preset.get("oh", 0)
-        if ow > 0 and oh > 0:
-            self.res_w_spin.setValue(ow)
-            self.res_h_spin.setValue(oh)
-
-        self.log(f"✅ 已应用预设: {preset_name} — {preset['desc']}")
+    def _on_platform_toggled(self, pname, checked):
+        """平台勾选时自动应用对应预设参数"""
+        if checked:
+            preset = PLATFORM_PRESETS.get(pname, {})
+            is_v = preset.get("is_vertical")
+            if is_v is True:
+                self.chk_vertical.setChecked(True)
+            elif is_v is False:
+                self.chk_horizontal.setChecked(True)
+            codec = preset.get("codec")
+            if codec:
+                idx = self.codec_combo.findText(codec)
+                if idx >= 0:
+                    self.codec_combo.setCurrentIndex(idx)
+            bitrate = preset.get("bitrate", 4)
+            if bitrate > 0:
+                self.bitrate_spin.setValue(bitrate)
+            ow, oh = preset.get("ow", 0), preset.get("oh", 0)
+            if ow > 0 and oh > 0:
+                self.res_w_spin.setValue(ow)
+                self.res_h_spin.setValue(oh)
 
     # -------- 批量模式 --------
     def on_batch_toggled(self, checked):
@@ -747,7 +762,7 @@ class MainWindow(QMainWindow):
     # -------- 分辨率联动 --------
     def _toggle_resolution_controls(self):
         """横屏时置灰分辨率控件（竖屏才可自定义分辨率）"""
-        is_portrait = self.radio_vertical.isChecked()
+        is_portrait = self.chk_vertical.isChecked()
         self.res_w_spin.setEnabled(is_portrait)
         self.res_h_spin.setEnabled(is_portrait)
         self.chk_lock_aspect.setEnabled(is_portrait)
@@ -877,7 +892,7 @@ class MainWindow(QMainWindow):
     # -------- 字幕源联动 --------
     def _toggle_subtitle_source(self):
         """根据字幕来源选择显示/隐藏外部文件导入面板"""
-        is_manual = self.radio_sub_manual.isChecked()
+        is_manual = self.chk_sub_manual.isChecked()
         self.subtitle_file_panel.setVisible(is_manual)
 
     # -------- 文件对话框 --------
@@ -1045,12 +1060,12 @@ class MainWindow(QMainWindow):
         # 字幕导出与外部字幕
         export_subtitle = self.chk_export_subtitle.isChecked()
         subtitle_file_path = ""
-        if self.radio_sub_manual.isChecked():
+        if self.chk_sub_manual.isChecked():
             subtitle_file_path = self.subtitle_file_path.text().strip()
 
         self.thread = VideoProcessThread(
             input_source=input_src,
-            is_vertical=self.radio_vertical.isChecked(),
+            is_vertical=self.chk_vertical.isChecked(),
             target_lang=self.audio_lang.currentText(),
             codec=self.codec_combo.currentText(),
             fps=30,
@@ -1079,6 +1094,7 @@ class MainWindow(QMainWindow):
             highlight_start_sec=self.highlight_start_spin.value(),
             highlight_dur_sec=self.highlight_dur_spin.value(),
             chapters=self._collect_chapters(),
+            multi_platforms=self._collect_multi_platforms(),
         )
 
         self.thread.update_frame.connect(self.update_preview)
@@ -1100,6 +1116,10 @@ class MainWindow(QMainWindow):
                 chapters.append({"start": t, "title": title})
         chapters.sort(key=lambda c: c["start"])
         return chapters
+
+    def _collect_multi_platforms(self):
+        """收集用户勾选的平台列表"""
+        return [name for name, chk in self.platform_checks.items() if chk.isChecked()]
 
     def reset_processing_state(self):
         if self.thread:
@@ -1148,15 +1168,15 @@ class MainWindow(QMainWindow):
     def save_config(self):
         """将当前 UI 控件状态保存为 JSON 模板"""
         config = {
-            "version": 2,
-            "preset": self.preset_combo.currentText(),
+            "version": 3,
+            "preset": "手动配置",
             "video_path": self.input_path.text(),
             "batch_enabled": self.chk_batch.isChecked(),
             "batch_folder": getattr(self, "batch_folder_path", ""),
             "trim_start": self.trim_start.value(),
             "trim_end": self.trim_end.value(),
             "target_lang": self.audio_lang.currentText(),
-            "is_vertical": self.radio_vertical.isChecked(),
+            "is_vertical": self.chk_vertical.isChecked(),
             "enable_subtitle": self.chk_subtitle.isChecked(),
             "subtitle_color": self.sub_color_combo.currentText(),
             "subtitle_font_size": self.sub_font_slider.value(),
@@ -1174,7 +1194,7 @@ class MainWindow(QMainWindow):
             "lock_aspect": self.chk_lock_aspect.isChecked(),
             "bgm_preserve": self.chk_bgm_preserve.isChecked(),
             "export_subtitle": self.chk_export_subtitle.isChecked(),
-            "subtitle_source": "manual" if self.radio_sub_manual.isChecked() else "auto",
+            "subtitle_source": "manual" if self.chk_sub_manual.isChecked() else "auto",
             "subtitle_file_path": self.subtitle_file_path.text().strip(),
             "enable_edge_tts_first": self.chk_edge_tts_first.isChecked(),
             "edge_tts_voice_0": self.combo_edge_spk0.currentData(),
@@ -1184,6 +1204,7 @@ class MainWindow(QMainWindow):
             "highlight_enabled": self.chk_highlight.isChecked(),
             "highlight_start_sec": self.highlight_start_spin.value(),
             "highlight_dur_sec": self.highlight_dur_spin.value(),
+            "platforms": self._collect_multi_platforms(),
             "chapters_enabled": self.chapter_group.isChecked(),
             "chapters": [{"start": r[0].value(), "title": r[1].text().strip()}
                          for r in self.chapter_rows],
@@ -1218,7 +1239,7 @@ class MainWindow(QMainWindow):
                 if idx >= 0:
                     widget.setCurrentIndex(idx)
 
-        _restore_combo(self.preset_combo, "preset")
+        # preset_combo 已移除，平台选择通过 checkboxes 恢复
         self.input_path.setText(config.get("video_path", ""))
         self.chk_batch.setChecked(config.get("batch_enabled", False))
         if config.get("batch_folder"):
@@ -1231,8 +1252,8 @@ class MainWindow(QMainWindow):
         _restore_combo(self.audio_lang, "target_lang")
 
         is_vert = config.get("is_vertical", True)
-        self.radio_vertical.setChecked(is_vert)
-        self.radio_horizontal.setChecked(not is_vert)
+        self.chk_vertical.setChecked(is_vert)
+        self.chk_horizontal.setChecked(not is_vert)
 
         self.chk_subtitle.setChecked(config.get("enable_subtitle", True))
         _restore_combo(self.sub_color_combo, "subtitle_color")
@@ -1270,9 +1291,9 @@ class MainWindow(QMainWindow):
         self.chk_export_subtitle.setChecked(config.get("export_subtitle", True))
         sub_source = config.get("subtitle_source", "auto")
         if sub_source == "manual":
-            self.radio_sub_manual.setChecked(True)
+            self.chk_sub_manual.setChecked(True)
         else:
-            self.radio_sub_auto.setChecked(True)
+            self.chk_sub_auto.setChecked(True)
         self.subtitle_file_path.setText(config.get("subtitle_file_path", ""))
 
         # 视频叠加信息
@@ -1286,6 +1307,15 @@ class MainWindow(QMainWindow):
         self.highlight_start_spin.setValue(config.get("highlight_start_sec", 0))
         self.highlight_dur_spin.setEnabled(hl_enabled)
         self.highlight_dur_spin.setValue(config.get("highlight_dur_sec", 3))
+
+        # 多平台输出
+        # 多平台输出
+        saved_platforms = config.get("platforms", [])
+        for name, chk in self.platform_checks.items():
+            chk.setChecked(name in saved_platforms)
+        saved_platforms = config.get("multi_platforms", [])
+        for name, chk in self.platform_checks.items():
+            chk.setChecked(name in saved_platforms)
 
         # 章节标记
         ch_enabled = config.get("chapters_enabled", False)

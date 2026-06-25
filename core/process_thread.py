@@ -12,7 +12,7 @@ from PyQt5.QtGui import QImage
 from openai import OpenAI
 from insightface.app import FaceAnalysis
 
-from .config import DASHSCOPE_API_KEY, AI_BASE_URL
+from .config import DASHSCOPE_API_KEY, AI_BASE_URL, PLATFORM_PRESETS
 from .audio_pipeline import AudioPipelineMixin
 from .video_processor import VideoProcessorMixin
 
@@ -41,7 +41,8 @@ class VideoProcessThread(QThread, AudioPipelineMixin, VideoProcessorMixin):
                  highlight_start_sec=0,
                  highlight_dur_sec=3,
                  bitrate_mbps=4,
-                 chapters=None):
+                 chapters=None,
+                 multi_platforms=None):
         super().__init__()
         self.input_source = input_source
         self.is_vertical = is_vertical
@@ -56,6 +57,7 @@ class VideoProcessThread(QThread, AudioPipelineMixin, VideoProcessorMixin):
         self.highlight_start_sec = highlight_start_sec
         self.highlight_dur_sec = highlight_dur_sec
         self.chapters = chapters or []
+        self.multi_platforms = multi_platforms or []
         self.upload_configs = upload_configs
         self.trim_start = trim_start
         self.trim_end = trim_end
@@ -105,27 +107,59 @@ class VideoProcessThread(QThread, AudioPipelineMixin, VideoProcessorMixin):
     # -------- 入口：单文件或批量 --------
 
     def run(self):
-        """QThread 入口 — 单文件或批量处理"""
+        """QThread 入口 — 单文件/批量/多平台"""
         self.batch_results = []
-        if self.batch_files:
-            total = len(self.batch_files)
-            for idx, file_path in enumerate(self.batch_files):
-                file_name = os.path.basename(file_path)
+        files = self.batch_files if self.batch_files else [self.input_source]
+        platforms = self.multi_platforms if self.multi_platforms else [None]
+
+        total_ops = len(files) * len(platforms)
+        op_idx = 0
+
+        for file_path in files:
+            file_name = os.path.basename(file_path)
+            if not self.running:
+                break
+
+            for plat_name in platforms:
                 if not self.running:
-                    result = {"file": file_name, "success": False, "error": "用户取消"}
-                    self.batch_results.append(result)
                     break
+                op_idx += 1
+
+                # 应用平台预设
+                if plat_name:
+                    preset = PLATFORM_PRESETS.get(plat_name, {})
+                    self.is_vertical = preset.get("is_vertical", self.is_vertical)
+                    codec = preset.get("codec")
+                    if codec:
+                        self.codec = codec
+                    self.bitrate_mbps = preset.get("bitrate", self.bitrate_mbps)
+                    ow = preset.get("ow", 0)
+                    oh = preset.get("oh", 0)
+                    if ow > 0 and oh > 0:
+                        self.output_w = ow
+                        self.output_h = oh
+
+                # 输出路径
                 safe_name = os.path.splitext(file_name)[0]
-                self.log_msg.emit(f"\n📁 批量处理 [{idx + 1}/{total}]: {file_name}")
+                suffix = f"_{safe_name}"
+                if plat_name:
+                    suffix += f"_{plat_name.replace(' ', '').replace('/', '')}"
+                elif len(files) == 1:
+                    suffix = ""
+
                 self.input_source = file_path
                 self.output_dir, self.temp_video, self.orig_audio, self.final_audio, self.final_output = \
-                    self.prepare_output_env(suffix=f"_{safe_name}")
+                    self.prepare_output_env(suffix=suffix)
                 self.video_writer = None
                 self.subtitles_timeline = []
                 self.smooth_center_x = None
 
-                # 记录每个文件的结果
-                result = {"file": file_name, "path": file_path, "output": self.final_output,
+                if plat_name:
+                    self.log_msg.emit(f"\n🎯 多平台 [{op_idx}/{total_ops}]: {file_name} → {plat_name}")
+                elif self.batch_files:
+                    self.log_msg.emit(f"\n📁 批量处理 [{op_idx}/{total_ops}]: {file_name}")
+
+                result = {"file": file_name, "platform": plat_name, "output": self.final_output,
                           "success": False, "error": None}
                 try:
                     self._process_single()
@@ -137,11 +171,11 @@ class VideoProcessThread(QThread, AudioPipelineMixin, VideoProcessorMixin):
                     result["error"] = str(e)
                 self.batch_results.append(result)
 
-                self.progress_changed.emit(int((idx + 1) / total * 100))
+                if total_ops > 1:
+                    self.progress_changed.emit(int(op_idx / total_ops * 100))
 
+        if self.batch_files or self.multi_platforms:
             self.batch_finished.emit(self.batch_results)
-        else:
-            self._process_single()
         self.finished.emit()
 
     def stop(self):

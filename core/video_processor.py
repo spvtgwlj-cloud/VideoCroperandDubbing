@@ -70,8 +70,9 @@ class VideoProcessorMixin:
             "-pix_fmt", "yuv420p",
             "-b:v", f"{self.bitrate_mbps}M",
         ]
-        if is_h265 and vt_ok:
-            cmd.extend(["-tag:v", "hvc1"])
+        if is_h265:
+            # H.265 封装需 hvc1 标签 + faststart 确保播放兼容
+            cmd.extend(["-tag:v", "hvc1", "-movflags", "+faststart"])
         cmd.extend([
             "-c:a", "aac", "-ac", "2", "-b:a", "256k",
             "-map", "0:v:0", "-map", "1:a:0",
