@@ -193,6 +193,10 @@ def add_subtitle(frame, text, original_text="", enable_subtitle=True, subtitle_s
     is_landscape = img_w > img_h
     base_dim = min(img_w, img_h)
 
+    # 横屏时缩小 2 号字体，避免底部信息过于拥挤
+    if is_landscape:
+        font_ratio *= 0.78
+
     # ========================================================
     # 先计算原文尺寸（双语模式下），待译文定位后确定原文位置
     # ========================================================
@@ -344,7 +348,7 @@ def add_subtitle(frame, text, original_text="", enable_subtitle=True, subtitle_s
         title_h = title_bbox[3] - title_bbox[1]
 
         # 位置：译文下方 1 行字高，横屏时额外上移防止与进度条重叠
-        title_gap = 25
+        title_gap = 35 if is_landscape else 25
         title_y = y + text_h + title_gap
         title_y = y + text_h + title_gap
         title_x = (img_w - title_w) // 2
@@ -426,8 +430,8 @@ def add_subtitle(frame, text, original_text="", enable_subtitle=True, subtitle_s
     if chapters and total_duration > 0:
         # 竖屏/横屏分别控制字号和栏高
         if is_landscape:
-            ch_font_size = max(9, int(font_size * 0.38))
-            bar_h = int(base_dim * 0.028)  # 横屏：固定窄条 ~30px
+            ch_font_size = max(8, int(font_size * 0.42))
+            bar_h = int(base_dim * 0.024)  # 横屏：更窄 ~26px
         else:
             ch_font_size = max(10, int(font_size * 0.68))
             bar_h = None  # 竖屏：自动计算

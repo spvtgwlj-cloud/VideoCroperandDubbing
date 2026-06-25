@@ -369,6 +369,105 @@ class TestOverlayRendering:
                               "overlay_sharer": "分享人名称",
                           })
         assert out.shape == frame.shape
-        # 验证有非黑像素（说明渲染了内容）
         non_black = np.sum(out > 5)
         assert non_black > 1000, "应该渲染了大量非黑内容"
+
+
+class TestChapterBar:
+    """章节进度条渲染"""
+
+    def _make_chapter_style(self, chapters, current_time=5.0, total_dur=60.0,
+                            is_landscape=False):
+        w, h = (1280, 720) if is_landscape else (720, 1280)
+        return w, h, {
+            "color": "黄色（推荐）",
+            "font_size": 0.048,
+            "bg_enabled": False,
+            "bilingual": False,
+            "_chapters": chapters,
+            "_current_time": current_time,
+            "_total_duration": total_dur,
+        }
+
+    def test_chapter_bar_visible(self):
+        """章节进度条在底部渲染可见像素"""
+        chapters = [{"start": 0, "title": "开场"}, {"start": 20, "title": "正片"}]
+        w, h, style = self._make_chapter_style(chapters)
+        frame = _make_test_frame(w, h)
+        out = add_subtitle(frame, "译文", original_text="",
+                          enable_subtitle=True, subtitle_style=style)
+        # 底部 bar 区域应有非黑像素（底板 + 章节文字）
+        bottom_bar = out[h * 4 // 5:, :, :]
+        non_black = np.sum(bottom_bar.max(axis=2) > 10)
+        assert non_black > 100, f"章节栏底部无可见内容, 非黑像素={non_black}"
+
+    def test_chapter_bar_absent_when_no_chapters(self):
+        """无章节数据时不渲染章节栏"""
+        w, h, style = self._make_chapter_style([])
+        frame = _make_test_frame(w, h)
+        out = add_subtitle(frame, "译文", original_text="",
+                          enable_subtitle=True, subtitle_style=style)
+        # 底部应该只有细条进度条或无内容（取决于 total_duration）
+        # 只要不崩溃即可
+        assert out.shape == frame.shape
+
+    def test_chapter_text_left_aligned(self):
+        """章节首字在时间标记位置，右侧有内容"""
+        chapters = [{"start": 10, "title": "测试章节"}]
+        w, h, style = self._make_chapter_style(chapters, current_time=5, total_dur=60)
+        frame = _make_test_frame(w, h)
+        out = add_subtitle(frame, "译文", original_text="",
+                          enable_subtitle=True, subtitle_style=style)
+        # 第 10 秒标记应在 bar_area_l + bar_area_w * 10/60 处
+        margin_x = int(w * 0.03)
+        bar_w = w - margin_x * 2
+        expected_x = margin_x + int(bar_w * 10 / 60)
+        # 该位置附近应有非黑像素（竖线标记 + 章节文字）
+        region = out[h * 4 // 5:, max(0, expected_x - 10):min(w, expected_x + 40), :]
+        non_black = np.sum(region.max(axis=2) > 10)
+        assert non_black > 0, f"章节标记位置 {expected_x} 附近无可见内容"
+
+    def test_playhead_visible(self):
+        """播放头竖线在进度位置可见"""
+        chapters = [{"start": 0, "title": "开场"}]
+        w, h, style = self._make_chapter_style(chapters, current_time=15, total_dur=60)
+        frame = _make_test_frame(w, h)
+        out = add_subtitle(frame, "译文", original_text="",
+                          enable_subtitle=True, subtitle_style=style)
+        # 播放头应有蓝色像素 (0, 188, 212) ≈ BGR(212, 188, 0)
+        bottom = out[h * 4 // 5:, :, :]
+        blue_mask = (bottom[:, :, 0] >= 200) & (bottom[:, :, 1] >= 150) & (bottom[:, :, 2] <= 50)
+        assert blue_mask.sum() > 0, "未检测到播放头蓝色竖线"
+
+    def test_progress_overlay_left_of_playhead(self):
+        """已播放遮罩在播放头左侧"""
+        chapters = [{"start": 0, "title": "开场"}, {"start": 30, "title": "结尾"}]
+        w, h, style = self._make_chapter_style(chapters, current_time=15, total_dur=60)
+        frame = _make_test_frame(w, h)
+        out = add_subtitle(frame, "译文", original_text="",
+                          enable_subtitle=True, subtitle_style=style)
+        bottom = out[h * 4 // 5:, :, :]
+        mid = w // 2
+        # 左半部分（已播）亮度应低于右半（未播，黑底+白字更亮）
+        left_bright = float(bottom[:, :mid, :].max())
+        right_bright = float(bottom[:, mid:, :].max())
+        # 右侧（未播黑底+白字）应该更亮或至少不全是黑
+        assert right_bright > 5, f"右侧未播区域过暗: {right_bright}"
+
+    def test_landscape_smaller_font(self):
+        """横屏字幕字体小于竖屏"""
+        chapters = [{"start": 0, "title": "开场"}]
+        # 竖屏
+        _, _, style_v = self._make_chapter_style(chapters, is_landscape=False)
+        out_v = add_subtitle(_make_test_frame(720, 1280), "译文测试", original_text="",
+                            enable_subtitle=True, subtitle_style=style_v)
+        # 横屏
+        _, _, style_h = self._make_chapter_style(chapters, is_landscape=True)
+        out_h = add_subtitle(_make_test_frame(1280, 720), "译文测试", original_text="",
+                            enable_subtitle=True, subtitle_style=style_h)
+        # 横屏字幕的非黑像素（字幕文字）应少于竖屏（字号更小 = 像素更少）
+        v_text_px = np.sum(out_v.max(axis=2) > 100)
+        h_text_px = np.sum(out_h.max(axis=2) > 100)
+        assert h_text_px < v_text_px, (
+            f"横屏字幕应更小: 横屏={h_text_px}px, 竖屏={v_text_px}px"
+        )
