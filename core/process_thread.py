@@ -120,6 +120,9 @@ class VideoProcessThread(QThread, AudioPipelineMixin, VideoProcessorMixin):
             if not self.running:
                 break
 
+            cached_ai = None
+            orig_input_source = self.input_source
+
             for plat_name in platforms:
                 if not self.running:
                     break
@@ -162,7 +165,22 @@ class VideoProcessThread(QThread, AudioPipelineMixin, VideoProcessorMixin):
                 result = {"file": file_name, "platform": plat_name, "output": self.final_output,
                           "success": False, "error": None}
                 try:
-                    self._process_single()
+                    if plat_name and cached_ai is not None:
+                        self.log_msg.emit("♻️ 复用 AI 管线结果（跳过 Whisper/翻译/TTS）...")
+                        import copy
+                        self.subtitles_timeline = copy.deepcopy(cached_ai["subtitles_timeline"])
+                        self.final_audio = cached_ai["final_audio"]
+                        self.input_source = cached_ai["input_source"]
+                        self._render_and_merge()
+                    else:
+                        self._process_single()
+                        if plat_name and cached_ai is None:
+                            cached_ai = {
+                                "subtitles_timeline": [dict(s) for s in self.subtitles_timeline],
+                                "final_audio": self.final_audio,
+                                "input_source": self.input_source,
+                            }
+
                     if os.path.exists(self.final_output) and os.path.getsize(self.final_output) > 0:
                         result["success"] = True
                     else:

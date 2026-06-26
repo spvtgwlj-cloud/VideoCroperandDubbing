@@ -347,9 +347,8 @@ def add_subtitle(frame, text, original_text="", enable_subtitle=True, subtitle_s
         title_w = title_bbox[2] - title_bbox[0]
         title_h = title_bbox[3] - title_bbox[1]
 
-        # 位置：译文下方 1 行字高，横屏时额外上移防止与进度条重叠
-        title_gap = 35 if is_landscape else 25
-        title_y = y + text_h + title_gap
+        # 位置：译文下方，竖屏多留半字高间隙
+        title_gap = 35 if is_landscape else 25 + int(font_size * 0.5)
         title_y = y + text_h + title_gap
         title_x = (img_w - title_w) // 2
 

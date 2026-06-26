@@ -1309,11 +1309,7 @@ class MainWindow(QMainWindow):
         self.highlight_dur_spin.setValue(config.get("highlight_dur_sec", 3))
 
         # 多平台输出
-        # 多平台输出
         saved_platforms = config.get("platforms", [])
-        for name, chk in self.platform_checks.items():
-            chk.setChecked(name in saved_platforms)
-        saved_platforms = config.get("multi_platforms", [])
         for name, chk in self.platform_checks.items():
             chk.setChecked(name in saved_platforms)
 

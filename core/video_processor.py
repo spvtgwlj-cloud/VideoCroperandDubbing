@@ -69,20 +69,22 @@ class VideoProcessorMixin:
             "-c:v", v_codec,
             "-pix_fmt", "yuv420p",
             "-b:v", f"{self.bitrate_mbps}M",
-        ]
-        if is_h265:
-            # H.265 封装需 hvc1 标签 + faststart 确保播放兼容
-            cmd.extend(["-tag:v", "hvc1", "-movflags", "+faststart"])
-        cmd.extend([
             "-c:a", "aac", "-ac", "2", "-b:a", "256k",
             "-map", "0:v:0", "-map", "1:a:0",
-            "-shortest", self.final_output,
-        ])
+        ]
+        # 容器级选项必须在 -map 之后（mp4 muxer 参数）
+        if is_h265:
+            cmd.extend(["-tag:v", "hvc1", "-movflags", "+faststart"])
+        cmd.extend(["-shortest", self.final_output])
 
         try:
             subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
             self.log_msg.emit(f"✅ 音视频合成成功 ({accel_tag})！")
-            for f in [self.temp_video, self.orig_audio, self.final_audio]:
+            # 多平台模式保留 final_audio 供后续平台复用
+            cleanup_files = [self.temp_video, self.orig_audio]
+            if not getattr(self, "multi_platforms", []):
+                cleanup_files.append(self.final_audio)
+            for f in cleanup_files:
                 if os.path.exists(f):
                     os.remove(f)
         except subprocess.CalledProcessError as e:
@@ -98,43 +100,43 @@ class VideoProcessorMixin:
         highlight_clip = os.path.join(self.output_dir, "highlight_clip.mp4")
         merged_output = os.path.join(self.output_dir, "merged_final.mp4")
 
-        # 探测编码器（复用 merge_audio_video 中的逻辑）
+        # 编码器（H.265 硬编码/H.264 硬编码优先）
         is_h265 = "H.265" in self.codec
         vt_ok = self._check_videotoolbox_available()
         v_codec = ("hevc_videotoolbox" if is_h265 else "h264_videotoolbox") if vt_ok else ("libx265" if is_h265 else "libx264")
 
         try:
-            # Step 1: 从 final_output 截取片段（重编码确保关键帧对齐）
+            # Step 1: 从 final_output 截取片段
             self.log_msg.emit(
                 f"🔥 视频爆点: 从第 {self.highlight_start_sec} 秒截取 {self.highlight_dur_sec} 秒片头..."
             )
-            subprocess.run(
-                ["ffmpeg", "-y",
-                 "-i", self.final_output,
-                 "-ss", str(self.highlight_start_sec),
-                 "-t", str(self.highlight_dur_sec),
-                 "-c:v", v_codec, "-b:v", f"{self.bitrate_mbps}M",
-                 "-c:a", "aac", "-b:a", "256k",
-                 "-pix_fmt", "yuv420p",
-                 highlight_clip],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True,
-            )
+            step1 = ["ffmpeg", "-y",
+                     "-i", self.final_output,
+                     "-ss", str(self.highlight_start_sec),
+                     "-t", str(self.highlight_dur_sec),
+                     "-c:v", v_codec, "-b:v", f"{self.bitrate_mbps}M",
+                     "-c:a", "aac", "-b:a", "256k",
+                     "-pix_fmt", "yuv420p",
+                     "-map", "0:v:0", "-map", "0:a:0"]
+            if is_h265:
+                step1.extend(["-tag:v", "hvc1", "-movflags", "+faststart"])
+            step1.append(highlight_clip)
+            subprocess.run(step1, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
 
-            # Step 2: concat filter 拼接（可靠，不受容器限制）
-            subprocess.run(
-                ["ffmpeg", "-y",
-                 "-i", highlight_clip,
-                 "-i", self.final_output,
-                 "-filter_complex",
-                 "[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[outv][outa]",
-                 "-map", "[outv]", "-map", "[outa]",
-                 "-c:v", v_codec, "-b:v", f"{self.bitrate_mbps}M",
-                 "-c:a", "aac", "-b:a", "256k",
-                 "-pix_fmt", "yuv420p",
-                 "-movflags", "+faststart",
-                 merged_output],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True,
-            )
+            # Step 2: concat filter 拼接
+            step2 = ["ffmpeg", "-y",
+                     "-i", highlight_clip,
+                     "-i", self.final_output,
+                     "-filter_complex",
+                     "[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[outv][outa]",
+                     "-map", "[outv]", "-map", "[outa]",
+                     "-c:v", v_codec, "-b:v", f"{self.bitrate_mbps}M",
+                     "-c:a", "aac", "-b:a", "256k",
+                     "-pix_fmt", "yuv420p"]
+            if is_h265:
+                step2.extend(["-tag:v", "hvc1", "-movflags", "+faststart"])
+            step2.append(merged_output)
+            subprocess.run(step2, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
 
             # Step 3: 替换原文件
             os.remove(self.final_output)
@@ -374,9 +376,97 @@ class VideoProcessorMixin:
                 self._prepend_highlight()
             self.progress_changed.emit(100)
             self.log_msg.emit(f"🎉 全部处理完成！文件保存在: {self.final_output}")
-        # 清理裁剪临时文件
-        if temp_trim_path and os.path.exists(temp_trim_path):
+        # 清理裁剪临时文件（多平台模式保留，后续平台复用）
+        if temp_trim_path and os.path.exists(temp_trim_path) and not getattr(self, "multi_platforms", []):
             try:
                 os.remove(temp_trim_path)
             except OSError:
                 pass
+
+    # -------- 画面渲染 + 合成（多平台复用：跳过 AI 管线） --------
+
+    def _render_and_merge(self):
+        """仅做画面渲染 + 音视频合成（复用已有的 subtitles_timeline + final_audio）"""
+        self.log_msg.emit("开始画面裁切渲染与动态字幕处理...")
+        self.progress_changed.emit(75)
+        cap = cv2.VideoCapture(self.input_source)
+        orig_fps = cap.get(cv2.CAP_PROP_FPS)
+        if orig_fps == 0 or np.isnan(orig_fps):
+            orig_fps = self.fps
+
+        total_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+        total_duration = total_frames / orig_fps if orig_fps > 0 else 0.0
+
+        frame_count, last_target_center_x, sub_cursor = 0, None, 0
+        self.subtitle_style["_total_duration"] = total_duration
+        self.subtitle_style["_chapters"] = getattr(self, "chapters", [])
+
+        max_frames = 0
+        if self.quick_preview_sec > 0:
+            max_frames = int(orig_fps * self.quick_preview_sec)
+
+        while self.running:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            current_time = frame_count / orig_fps
+            self.subtitle_style["_current_time"] = current_time
+            if self.quick_preview_sec > 0 and current_time > self.quick_preview_sec:
+                break
+            while sub_cursor < len(self.subtitles_timeline) and current_time > self.subtitles_timeline[sub_cursor]["end"]:
+                sub_cursor += 1
+            current_text = ""
+            current_orig = ""
+            if sub_cursor < len(self.subtitles_timeline):
+                sub = self.subtitles_timeline[sub_cursor]
+                if sub["start"] <= current_time <= sub["end"]:
+                    current_text = sub["text"]
+                    current_orig = sub.get("original_text", "")
+
+            h, w, _ = frame.shape
+            out_frame = frame
+            if self.is_vertical:
+                if last_target_center_x is None:
+                    last_target_center_x = w // 2
+                if frame_count % 4 == 0:
+                    faces = self.face_app.get(frame)
+                    if len(faces) > 0:
+                        largest_face = max(faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
+                        last_target_center_x = int((largest_face.bbox[0] + largest_face.bbox[2]) / 2)
+                if self.smooth_center_x is None:
+                    self.smooth_center_x = last_target_center_x
+                else:
+                    self.smooth_center_x += (last_target_center_x - self.smooth_center_x) * self.damping_factor
+                target_w = min(int(h * 9 / 16), w)
+                x1 = int(self.smooth_center_x - target_w / 2)
+                x2 = x1 + target_w
+                if x1 < 0:
+                    x1, x2 = 0, target_w
+                elif x2 > w:
+                    x1, x2 = w - target_w, w
+                out_frame = cv2.resize(frame[:, x1:x2], (self.output_w, self.output_h))
+
+            out_frame = self.add_subtitle(out_frame, current_text, current_orig)
+            if self.video_writer is None:
+                self.video_writer = cv2.VideoWriter(
+                    self.temp_video, cv2.VideoWriter_fourcc(*"mp4v"), orig_fps,
+                    (out_frame.shape[1], out_frame.shape[0]),
+                )
+            self.video_writer.write(out_frame)
+            if frame_count % 3 == 0:
+                rgb_image = cv2.cvtColor(out_frame, cv2.COLOR_BGR2RGB)
+                self.update_frame.emit(QImage(rgb_image.data, rgb_image.shape[1], rgb_image.shape[0],
+                                             rgb_image.shape[2] * rgb_image.shape[1], QImage.Format_RGB888))
+            frame_count += 1
+
+        cap.release()
+        if self.video_writer:
+            self.video_writer.release()
+
+        self.progress_changed.emit(90)
+        if self.running:
+            self.merge_audio_video()
+            if self.highlight_enabled:
+                self._prepend_highlight()
+            self.progress_changed.emit(100)
+            self.log_msg.emit(f"🎉 全部处理完成！文件保存在: {self.final_output}")
