@@ -17,6 +17,14 @@ from ui.ui_main import MainWindow
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+
+    # 启动画面（MainWindow 构造期间可见，构造完成后自动淡出）
+    from ui.splash_screen import SplashScreen
+    splash = SplashScreen()
+    splash.show()
+    app.processEvents()
+
     window = MainWindow()
     window.show()
+    splash.finish(window)
     sys.exit(app.exec_())

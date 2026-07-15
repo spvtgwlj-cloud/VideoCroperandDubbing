@@ -1,9 +1,9 @@
 # 视频智能裁剪和配音产品 — 产品需求文档 (PRD)
 
-**版本**: v4.3.2  
-**最后更新**: 2026-06-26  
+**版本**: v4.3.3  
+**最后更新**: 2026-06-29  
 **产品名称**: AI Video Dubbing Pro  
-**文档状态**: ✅ 已发布 | 多平台 AI 管线复用 + H.265 兼容性修复
+**文档状态**: ✅ 已发布 | 启动画面（Splash Screen）
 
 ---
 
@@ -117,6 +117,7 @@
 | 63 | **UI 统一方形选择框** | ✅ 已完成 | P2 | **v4.3.1 调整**：画面输出/字幕来源 radio 改为方形 checkbox + QButtonGroup |
 | 64 | **H.265 封装修复** | ✅ 已完成 | P1 | **v4.3.2 修复**：`-tag:v hvc1` 移至 `-map` 后 + 爆点命令补 tag，确保 QuickTime 可播 |
 | 65 | **多平台 AI 复用** | ✅ 已完成 | P1 | **v4.3.2 优化**：多平台模式缓存 AI 管线，Whisper/翻译/TTS 仅执行一次，3 平台耗时 ~1.6× |
+| 66 | **启动画面 (Splash Screen)** | ✅ 已完成 | P2 | **v4.3.3 新增**：应用启动时显示 420×240 品牌启动画面（深蓝色渐变 + 🎬 图标 + 应用名 + 版本号 + 底部彩色横条），MainWindow 构造完成后自动淡出过渡。零外部资源依赖，纯 QPainter 代码绘制。`ui/splash_screen.py` |
 
 ### 2.5 工程质量 (v4.2.6)
 
@@ -170,9 +171,10 @@ _process_single() 入口
 
 ```
 VideoCropper-LLMBased/
-├── entry.py                              # 主入口（含 urllib3 警告过滤）
+├── entry.py                              # 主入口（含 urllib3 警告过滤 + SplashScreen）
 ├── ui/
-│   └── ui_main.py                        # MainWindow 主 UI（~1115 行）
+│   ├── splash_screen.py                   # 启动画面（QSplashScreen，纯代码绘制，零资源依赖）
+│   └── ui_main.py                        # MainWindow 主 UI（~1300 行）
 ├── core/
 │   ├── config.py                         # 全局常量 / API KEY / 预设模板 / Edge-TTS 音色列表（~55 行）
 │   ├── process_thread.py                 # VideoProcessThread (QThread), run+stop（~152 行）
@@ -414,6 +416,7 @@ pytest tests/ -v                   # 运行测试
 | **v4.3.0** | **2026-06-23** | **面板左右互换（配置左/预览右） + 视频爆点片头（concat filter，1-5s 可配） + 码率 UI 可配（1-20 Mbps） + 主标题居中 + Overlay 独立于字幕开关** |
 | **v4.3.1** | **2026-06-25** | **章节进度条 + 多平台输出 + UI 方形统一 + 打包** |
 | **v4.3.2** | **2026-06-26** | **多平台 AI 管线复用 + H.265 tag 顺序修复 + 配置保存修复 + 竖屏标题间隙** |
+| **v4.3.3** | **2026-06-29** | **启动画面（Splash Screen）— 420×240 品牌启动画面，纯代码绘制，零资源依赖** |
 
 ---
 
