@@ -52,6 +52,9 @@ hidden_imports = [
     "openai",
     "requests",
     "edge_tts",
+    # 智能检索（v4.4.0）
+    "core.search_types", "core.smart_search", "core.trend_sources",
+    "core.trend_thread", "core.search_thread", "ui.smart_search_dialog",
     # 其他
     "numpy", "numpy.core", "numpy.linalg",
     "scipy",

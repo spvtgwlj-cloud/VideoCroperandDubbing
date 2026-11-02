@@ -323,3 +323,19 @@ def test_export_ledger_roundtrip(tmp_path, monkeypatch):
     save_export_ledger(ledger)
     ledger2 = load_export_ledger()
     assert is_already_exported(clip, ledger2)
+
+
+def test_feature_flag_defaults_on(monkeypatch):
+    import importlib, core.config
+    monkeypatch.delenv("AI_VIDEO_SMART_SEARCH", raising=False)
+    importlib.reload(core.config)
+    assert core.config.ENABLE_SMART_SEARCH is True
+
+
+def test_feature_flag_can_be_disabled(monkeypatch):
+    import importlib, core.config
+    monkeypatch.setenv("AI_VIDEO_SMART_SEARCH", "0")
+    importlib.reload(core.config)
+    assert core.config.ENABLE_SMART_SEARCH is False
+    monkeypatch.delenv("AI_VIDEO_SMART_SEARCH")
+    importlib.reload(core.config)

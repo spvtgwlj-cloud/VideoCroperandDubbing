@@ -13,6 +13,9 @@ from .llm_config import (
 
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 
+# 智能检索功能开关：设置 AI_VIDEO_SMART_SEARCH=0 可隐藏入口
+ENABLE_SMART_SEARCH = os.environ.get("AI_VIDEO_SMART_SEARCH", "1") != "0"
+
 # ==========================================
 # 平台预设模板
 # ==========================================

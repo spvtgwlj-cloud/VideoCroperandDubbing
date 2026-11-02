@@ -15,7 +15,9 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt
 
-from core.config import PLATFORM_PRESETS, SUBTITLE_COLORS, EDGE_TTS_VOICES
+from core.config import (
+    PLATFORM_PRESETS, SUBTITLE_COLORS, EDGE_TTS_VOICES, ENABLE_SMART_SEARCH,
+)
 from core.llm_config import load_llm_config
 from core.process_thread import VideoProcessThread
 
@@ -684,6 +686,10 @@ class MainWindow(QMainWindow):
         self.btn_api_config = QPushButton("🔑 AI 大模型设置")
         self.btn_api_config.clicked.connect(self.open_api_config)
         config_btn_layout.addWidget(self.btn_api_config)
+        self.btn_smart_search = QPushButton("🔍 智能检索")
+        self.btn_smart_search.clicked.connect(self.open_smart_search)
+        self.btn_smart_search.setVisible(ENABLE_SMART_SEARCH)
+        config_btn_layout.addWidget(self.btn_smart_search)
         config_btn_layout.addStretch()
         config_layout.addLayout(config_btn_layout, 21, 0, 1, 4)
 
@@ -1018,6 +1024,16 @@ class MainWindow(QMainWindow):
         dialog = ApiConfigDialog(config, self)
         if dialog.exec_() == QDialog.Accepted:
             self.log("✅ API 配置已更新")
+
+    def open_smart_search(self):
+        """打开智能检索对话框（懒加载，失败不影响主程序）"""
+        if not ENABLE_SMART_SEARCH:
+            return self.log("ℹ️ 智能检索功能已关闭")
+        try:
+            from ui.smart_search_dialog import SmartSearchDialog
+            SmartSearchDialog(self).exec_()
+        except Exception as e:
+            self.log(f"⚠️ 智能检索不可用: {e}")
 
     # -------- 开始处理 --------
     def start_processing(self):
