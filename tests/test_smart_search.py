@@ -1,9 +1,16 @@
 """智能检索核心逻辑单测。"""
 
+import os
+
 import pytest
 
+import core.smart_search as smart_search
 from core.search_types import Hit, MatchContext, SearchIndex, TrendAngle
-from core.smart_search import keyword_match, merge_hits, prefilter, tokenize
+from core.smart_search import (
+    keyword_match, load_cached_transcript, merge_hits, prefilter,
+    save_cached_transcript, tokenize, transcript_cache_key,
+    transcript_cache_path,
+)
 
 
 def _index(texts, duration=60.0):
@@ -103,3 +110,31 @@ def test_merge_hits_top_k_and_duplicate_index():
     clips = merge_hits(hits, segments, duration=60.0, top_k=1)
     assert len(clips) == 1
     assert clips[0].score == pytest.approx(0.9)
+
+
+def test_transcript_cache_key_changes_with_content_and_model(tmp_path):
+    video = tmp_path / "a.mp4"
+    video.write_bytes(b"x" * 100)
+    k1 = transcript_cache_key(str(video), "turbo")
+    video.write_bytes(b"x" * 101)
+    k2 = transcript_cache_key(str(video), "turbo")
+    k3 = transcript_cache_key(str(video), "small")
+    assert k1 != k2
+    assert k2 != k3
+    assert len(k1) == 16
+
+
+def test_transcript_cache_roundtrip(tmp_path, monkeypatch):
+    monkeypatch.setattr(smart_search, "CACHE_ROOT", str(tmp_path / "cache"))
+    data = {"duration": 12.0, "language": "en", "segments": [{"start": 0.0, "end": 1.0, "text": "hi"}]}
+    save_cached_transcript("abc123", data)
+    assert load_cached_transcript("abc123") == data
+
+
+def test_transcript_cache_corrupt_returns_none(tmp_path, monkeypatch):
+    monkeypatch.setattr(smart_search, "CACHE_ROOT", str(tmp_path / "cache"))
+    path = transcript_cache_path("badbad")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("{not json")
+    assert load_cached_transcript("badbad") is None

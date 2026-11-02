@@ -4,6 +4,9 @@
 禁止调用 _compress_silence()，禁止复用 subtitles_timeline。
 """
 
+import hashlib
+import json
+import os
 import re
 
 from .search_types import Clip, Hit, MatchContext, SearchIndex
@@ -20,6 +23,10 @@ KEYWORD_HIT_SCORE = 0.3
 LLM_TIMEOUT_SECONDS = 30
 LLM_MAX_CONSECUTIVE_FAILURES = 2
 DEFAULT_BATCH_SIZE = 10
+
+CACHE_ROOT = os.path.join(
+    os.path.expanduser("~"), ".ai_video_dubbing_pro", "smart_search"
+)
 
 _LATIN_RE = re.compile(r"[a-z0-9]+")
 _CJK_RE = re.compile(r"[一-鿿]+")
@@ -228,3 +235,50 @@ def merge_hits(
 
     # 8. Top-K
     return kept[:top_k]
+
+
+def transcript_cache_key(video_path: str, model_name: str = "turbo") -> str:
+    """按文件大小、mtime、首尾 1MB 与模型名生成 16 位缓存 key。"""
+    try:
+        stat = os.stat(video_path)
+        with open(video_path, "rb") as f:
+            head = f.read(1024 * 1024)
+            f.seek(max(0, stat.st_size - 1024 * 1024))
+            tail = f.read(1024 * 1024)
+    except OSError:
+        return ""
+
+    digest = hashlib.sha256()
+    digest.update(str(stat.st_size).encode("utf-8"))
+    digest.update(str(stat.st_mtime).encode("utf-8"))
+    digest.update(head)
+    digest.update(tail)
+    digest.update(model_name.encode("utf-8"))
+    return digest.hexdigest()[:16]
+
+
+def transcript_cache_path(key: str) -> str:
+    """转写缓存文件路径。"""
+    return os.path.join(CACHE_ROOT, "transcripts", f"{key}.json")
+
+
+def load_cached_transcript(key: str) -> dict | None:
+    """读取缓存；不存在或损坏返回 None。"""
+    if not key:
+        return None
+    path = transcript_cache_path(key)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def save_cached_transcript(key: str, data: dict) -> None:
+    """写入缓存。"""
+    if not key:
+        return
+    path = transcript_cache_path(key)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
