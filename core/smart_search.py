@@ -350,3 +350,151 @@ def transcribe_audio(audio_path: str, model: Any = None,
         "segments": result.get("segments", []),
         "language": result.get("language", ""),
     }
+
+
+class LLMUnavailableError(RuntimeError):
+    """LLM 连续失败，本次运行应整体降级为关键词匹配。"""
+
+
+def _strip_code_fence(raw: str) -> str:
+    text = (raw or "").strip()
+    text = re.sub(r"^```[a-zA-Z]*\s*", "", text)
+    text = re.sub(r"\s*```$", "", text)
+    return text.strip()
+
+
+def build_match_prompt(context: MatchContext, sentences: list[str]) -> str:
+    """构造批量打分 prompt；句子编号从 0 开始。"""
+    lines = [
+        "你是视频内容分析助手。根据用户需求与热点角度，判断每句转写是否相关。",
+        "要求：跨语言语义匹配；只返回 JSON 数组；每项格式：",
+        '{"i": 句子编号, "relevant": true/false, "confidence": 0-1, '
+        '"reason": "简短中文理由", "angle": "关联角度标题或空字符串"}',
+        "",
+        f"用户需求: {context.query or '（无，仅按热点角度匹配）'}",
+    ]
+    if context.angles:
+        lines.append("热点角度:")
+        for idx, angle in enumerate(context.angles):
+            lines.append(
+                f"- [{idx}] {angle.title} | 关键词: {', '.join(angle.keywords)} "
+                f"| 理由: {angle.why}"
+            )
+    lines.append("待判断句子:")
+    for i, sentence in enumerate(sentences):
+        lines.append(f"{i}. {sentence}")
+    return "\n".join(lines)
+
+
+def parse_match_response(raw: str, expected_count: int) -> list[dict]:
+    """解析 LLM 返回的 JSON 数组，容忍 ```json 围栏。"""
+    text = _strip_code_fence(raw)
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        raise ValueError(f"LLM 返回不是合法 JSON: {exc}") from exc
+    if isinstance(data, dict):
+        data = data.get("results", data.get("items"))
+    if not isinstance(data, list):
+        raise ValueError("LLM 返回不是 JSON 数组")
+    return [item for item in data if isinstance(item, dict)]
+
+
+def _hit_from_item(item: dict, segment_index: int) -> Hit | None:
+    if not item.get("relevant"):
+        return None
+    try:
+        confidence = float(item.get("confidence", 0))
+    except (TypeError, ValueError):
+        return None
+    if confidence < LLM_CONFIDENCE_HIT:
+        return None
+
+    raw_angle = item.get("angle")
+    if isinstance(raw_angle, list):
+        angles = [str(angle) for angle in raw_angle if angle]
+    elif raw_angle:
+        angles = [str(raw_angle)]
+    else:
+        angles = []
+
+    return Hit(
+        index=segment_index,
+        score=confidence,
+        reason=str(item.get("reason", "")),
+        angles=angles,
+    )
+
+
+def _call_llm(client: Any, model: str, prompt: str) -> str:
+    response = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.3,
+        timeout=LLM_TIMEOUT_SECONDS,
+    )
+    return response.choices[0].message.content
+
+
+def llm_match_sentence(context: MatchContext, sentence: str, segment_index: int,
+                       client: Any, model: str,
+                       log_cb: Callable[[str], None] | None = None) -> Hit | None:
+    """单句打分（批量失败时回退）。"""
+    prompt = build_match_prompt(context, [sentence])
+    raw = _call_llm(client, model, prompt)
+    data = json.loads(_strip_code_fence(raw))
+    if isinstance(data, list):
+        data = data[0] if data else {}
+    if not isinstance(data, dict):
+        return None
+    return _hit_from_item(data, segment_index)
+
+
+def llm_match_sentences(
+    context: MatchContext,
+    sentences: list[str],
+    segment_indexes: list[int],
+    client: Any,
+    model: str,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+    log_cb: Callable[[str], None] | None = None,
+) -> list[Hit]:
+    """批量 LLM 打分；连续两批失败时抛 LLMUnavailableError。"""
+    hits: list[Hit] = []
+    consecutive_failures = 0
+
+    for start in range(0, len(sentences), batch_size):
+        batch = sentences[start:start + batch_size]
+        batch_indexes = segment_indexes[start:start + batch_size]
+        prompt = build_match_prompt(context, batch)
+
+        try:
+            raw = _call_llm(client, model, prompt)
+            items = parse_match_response(raw, len(batch))
+            consecutive_failures = 0
+        except Exception as exc:
+            consecutive_failures += 1
+            if consecutive_failures >= LLM_MAX_CONSECUTIVE_FAILURES:
+                raise LLMUnavailableError(str(exc)) from exc
+            if log_cb:
+                log_cb(f"LLM 批次失败，改单句重试: {exc}")
+            for sentence, segment_index in zip(batch, batch_indexes):
+                try:
+                    hit = llm_match_sentence(
+                        context, sentence, segment_index, client, model, log_cb,
+                    )
+                    if hit is not None:
+                        hits.append(hit)
+                except Exception:
+                    pass
+            continue
+
+        for position, item in enumerate(items):
+            local_index = item.get("i", position)
+            if not isinstance(local_index, int) or not 0 <= local_index < len(batch_indexes):
+                local_index = position
+            hit = _hit_from_item(item, batch_indexes[local_index])
+            if hit is not None:
+                hits.append(hit)
+
+    return hits

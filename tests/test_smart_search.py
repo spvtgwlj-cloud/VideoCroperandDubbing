@@ -2,15 +2,17 @@
 
 import os
 import sys
+from types import SimpleNamespace
 
 import pytest
 
 import core.smart_search as smart_search
 from core.search_types import Hit, MatchContext, SearchIndex, TrendAngle
 from core.smart_search import (
-    extract_audio, keyword_match, load_cached_transcript, merge_hits,
-    prefilter, probe_duration, save_cached_transcript, tokenize,
-    transcribe_audio, transcript_cache_key, transcript_cache_path,
+    LLMUnavailableError, extract_audio, keyword_match, llm_match_sentences,
+    load_cached_transcript, merge_hits, prefilter, probe_duration,
+    save_cached_transcript, tokenize, transcribe_audio,
+    transcript_cache_key, transcript_cache_path,
 )
 
 
@@ -195,3 +197,70 @@ def test_transcribe_audio_returns_uncompressed_segments(monkeypatch):
     assert result["language"] == "en"
     assert captured["model_name"] == "turbo"
     assert captured["path"] == "a.wav"
+
+
+class _FakeCompletions:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        item = self.responses.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=item))]
+        )
+
+
+class _FakeClient:
+    def __init__(self, responses):
+        self.chat = SimpleNamespace(completions=_FakeCompletions(responses))
+
+
+def test_llm_match_parses_batch_json():
+    client = _FakeClient(['[{"i":0,"relevant":true,"confidence":0.9,"reason":"提到价格","angle":"成本"}]'])
+    hits = llm_match_sentences(
+        MatchContext(query="价格", angles=[]), ["这个价格很便宜"], [0], client, "model",
+    )
+    assert len(hits) == 1
+    assert hits[0].index == 0 and hits[0].score == pytest.approx(0.9)
+    assert hits[0].angles == ["成本"]
+
+
+def test_llm_match_strips_code_fence():
+    raw = '```json\n[{"i":0,"relevant":true,"confidence":0.8,"reason":"ok"}]\n```'
+    client = _FakeClient([raw])
+    hits = llm_match_sentences(MatchContext(query="q", angles=[]), ["s"], [3], client, "m")
+    assert hits[0].index == 3
+
+
+def test_llm_match_filters_below_confidence_threshold():
+    client = _FakeClient(['[{"i":0,"relevant":true,"confidence":0.4,"reason":"弱"}]'])
+    hits = llm_match_sentences(MatchContext(query="q", angles=[]), ["s"], [0], client, "m")
+    assert hits == []
+
+
+def test_llm_match_retries_single_sentence_on_batch_failure():
+    client = _FakeClient([
+        RuntimeError("batch down"),
+        '{"relevant":true,"confidence":0.7,"reason":"单句重试"}',
+    ])
+    hits = llm_match_sentences(MatchContext(query="q", angles=[]), ["s"], [2], client, "m")
+    assert len(hits) == 1 and hits[0].index == 2
+
+
+def test_llm_match_circuit_breaker():
+    # 第 1 批失败计 1 次并做单句重试；第 2 批失败时计数达到 2，立即熔断
+    client = _FakeClient([RuntimeError("down")] * 3)
+    with pytest.raises(LLMUnavailableError):
+        llm_match_sentences(
+            MatchContext(query="q", angles=[]),
+            ["a", "b", "c"], [0, 1, 2], client, "m", batch_size=1,
+        )
+
+
+def test_llm_match_passes_timeout():
+    client = _FakeClient(['[{"i":0,"relevant":true,"confidence":0.9,"reason":"ok"}]'])
+    llm_match_sentences(MatchContext(query="q", angles=[]), ["s"], [0], client, "m")
+    assert client.chat.completions.calls[0]["timeout"] == 30
