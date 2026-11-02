@@ -55,6 +55,10 @@ class SmartSearchDialog(QDialog):
         main_layout.addWidget(self._build_intent_group())
         main_layout.addWidget(self._build_params_group())
         main_layout.addLayout(self._build_action_row())
+        self.status_label = QLabel("准备就绪")
+        self.status_label.setWordWrap(True)
+        self.status_label.setStyleSheet("color: #B0B0D0;")
+        main_layout.addWidget(self.status_label)
         main_layout.addWidget(self._build_results_group(), 1)
         main_layout.addWidget(self._build_log_group())
 
@@ -286,6 +290,15 @@ class SmartSearchDialog(QDialog):
         )
         self.input_out_dir.setText(default)
 
+    def prefill_scope(self, single_path="", batch_folder="", use_batch=False):
+        """从主窗口带入当前选择，避免用户以为已选文件但对话框为空。"""
+        if use_batch and batch_folder and os.path.isdir(batch_folder):
+            self.input_batch.setText(batch_folder)
+            self.radio_batch.setChecked(True)
+        elif single_path and os.path.isfile(single_path):
+            self.input_single.setText(single_path)
+            self.radio_single.setChecked(True)
+
     # ----------------------------------------------------------------
     # 热点
     # ----------------------------------------------------------------
@@ -423,6 +436,13 @@ class SmartSearchDialog(QDialog):
         self.log_view.append(msg)
         bar = self.log_view.verticalScrollBar()
         bar.setValue(bar.maximum())
+        self._set_status(msg, warn=msg.startswith(("⚠️", "❌")))
+
+    def _set_status(self, text, warn=False):
+        self.status_label.setText(text)
+        self.status_label.setStyleSheet(
+            "color: #FF6D00;" if warn else "color: #B0B0D0;"
+        )
 
     def _on_progress(self, value):
         self.progress.setValue(int(value))

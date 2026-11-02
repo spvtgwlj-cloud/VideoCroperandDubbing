@@ -1033,7 +1033,13 @@ class MainWindow(QMainWindow):
             return self.log("⚠️ 配音处理中，请完成后再使用智能检索")
         try:
             from ui.smart_search_dialog import SmartSearchDialog
-            SmartSearchDialog(self).exec_()
+            dialog = SmartSearchDialog(self)
+            dialog.prefill_scope(
+                single_path=self.input_path.text().strip(),
+                batch_folder=self.batch_folder_path,
+                use_batch=self.chk_batch.isChecked(),
+            )
+            dialog.exec_()
         except Exception as e:
             self.log(f"⚠️ 智能检索不可用: {e}")
 

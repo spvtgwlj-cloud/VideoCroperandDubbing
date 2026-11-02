@@ -520,12 +520,28 @@ def llm_match_sentences(
     model: str,
     batch_size: int = DEFAULT_BATCH_SIZE,
     log_cb: Callable[[str], None] | None = None,
+    progress_cb: Callable[[float], None] | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> list[Hit]:
-    """批量 LLM 打分；连续两批失败时抛 LLMUnavailableError。"""
+    """批量 LLM 打分；连续两批失败时抛 LLMUnavailableError。
+
+    progress_cb 接收 0-1 的完成比例，供 UI 更新进度条；
+    should_stop 在每个批次开始前检查，用于响应停止按钮。
+    """
     hits: list[Hit] = []
     consecutive_failures = 0
+    total = max(1, len(sentences))
+
+    def _report(done: int) -> None:
+        if progress_cb is not None:
+            progress_cb(min(1.0, done / total))
+        if log_cb is not None:
+            log_cb(f"🧠 LLM 打分 {done}/{len(sentences)} 句...")
 
     for start in range(0, len(sentences), batch_size):
+        if should_stop is not None and should_stop():
+            break
+
         batch = sentences[start:start + batch_size]
         batch_indexes = segment_indexes[start:start + batch_size]
         prompt = build_match_prompt(context, batch)
@@ -549,6 +565,7 @@ def llm_match_sentences(
                         hits.append(hit)
                 except Exception:
                     pass
+            _report(min(start + batch_size, len(sentences)))
             continue
 
         for position, item in enumerate(items):
@@ -558,6 +575,8 @@ def llm_match_sentences(
             hit = _hit_from_item(item, batch_indexes[local_index])
             if hit is not None:
                 hits.append(hit)
+
+        _report(min(start + batch_size, len(sentences)))
 
     return hits
 

@@ -88,6 +88,16 @@ def test_thread_stop_before_first_file(monkeypatch):
     assert results == []
 
 
+def test_thread_emits_intermediate_progress(monkeypatch):
+    _patch_pipeline(monkeypatch)
+    thread = st.SmartSearchThread(["a.mp4"], "价格", [], "H.264 (MP4)", 4, "/tmp/out")
+    progress = []
+    thread.progress_changed.connect(progress.append)
+    thread.run()
+    assert any(0 < value < 100 for value in progress)
+    assert progress[-1] == 100
+
+
 def test_thread_continues_after_clip_export_failure(monkeypatch):
     _patch_pipeline(monkeypatch)
     clips = [_clip("a.mp4", 1.0, 10.0), _clip("a.mp4", 20.0, 30.0)]

@@ -75,6 +75,16 @@ class SmartSearchThread(QThread):
         except Exception:
             return None, ""
 
+    def _file_progress(self, file_pos: int, total_files: int):
+        base = file_pos / max(1, total_files) * 100.0
+        span = 100.0 / max(1, total_files)
+
+        def emit(local: float) -> None:
+            local = max(0.0, min(1.0, local))
+            self.progress_changed.emit(int(base + span * local))
+
+        return emit
+
     def run(self):
         results = []
         ledger = {}
@@ -87,8 +97,11 @@ class SmartSearchThread(QThread):
             for file_pos, video in enumerate(self.scope_files):
                 if not self.running:
                     break
+                emit_progress = self._file_progress(file_pos, total_files)
                 try:
-                    results.extend(self._process_file(video, context, ledger))
+                    results.extend(
+                        self._process_file(video, context, ledger, emit_progress)
+                    )
                 except Exception as exc:
                     if not self.running:
                         self.log_msg.emit(
@@ -96,9 +109,7 @@ class SmartSearchThread(QThread):
                         )
                     else:
                         self.log_msg.emit(f"⚠️ {video} 处理失败: {exc}")
-                self.progress_changed.emit(
-                    int((file_pos + 1) / total_files * 100)
-                )
+                emit_progress(1.0)
         except Exception as exc:
             self.error.emit(str(exc))
         finally:
@@ -120,7 +131,8 @@ class SmartSearchThread(QThread):
                 self.log_msg.emit(f"⚠️ 报告保存失败: {exc}")
             self.finished.emit()
 
-    def _process_file(self, video, context, ledger):
+    def _process_file(self, video, context, ledger, progress_cb):
+        progress_cb(0.02)
         key = transcript_cache_key(video, "turbo")
         filekey8 = key[:8]
         cached = load_cached_transcript(key)
@@ -131,14 +143,22 @@ class SmartSearchThread(QThread):
             if duration <= 0:
                 duration = probe_duration(video)
             self.log_msg.emit(f"♻️ 命中转写缓存: {os.path.basename(video)}")
+            progress_cb(0.15)
         else:
             duration = probe_duration(video)
+            progress_cb(0.05)
             with tempfile.TemporaryDirectory(prefix="smart_search_") as tmp:
                 wav_path = os.path.join(tmp, "audio.wav")
                 extract_audio(
                     video, wav_path, self.log_msg.emit,
                     should_stop=lambda: not self.running,
                 )
+                progress_cb(0.15)
+                self.log_msg.emit(
+                    f"🎙️ 正在转写（Whisper turbo，可能较慢）: "
+                    f"{os.path.basename(video)}"
+                )
+                progress_cb(0.20)
                 data = transcribe_audio(
                     wav_path,
                     model=self._get_whisper_model(),
@@ -155,6 +175,10 @@ class SmartSearchThread(QThread):
             self.log_msg.emit(
                 f"🎙️ 转写完成: {os.path.basename(video)} ({len(segments)} 句)"
             )
+            progress_cb(0.45)
+
+        if not self.running:
+            return []
 
         index = build_index(segments, video, filekey8, duration)
         if self.deep_mode:
@@ -162,19 +186,33 @@ class SmartSearchThread(QThread):
         else:
             candidates = prefilter(context, index)
         sentences = [segments[i].get("text", "") for i in candidates]
+        progress_cb(0.50)
 
         if self._client and sentences:
+            self.log_msg.emit(
+                f"🧠 LLM 打分 {len(sentences)} 句"
+                f"{'（深度模式）' if self.deep_mode else ''}..."
+            )
             try:
                 hits = llm_match_sentences(
                     context, sentences, candidates,
                     self._client, self._model, self.batch_size,
                     log_cb=self.log_msg.emit,
+                    progress_cb=lambda fraction: progress_cb(
+                        0.50 + 0.35 * fraction
+                    ),
+                    should_stop=lambda: not self.running,
                 )
             except LLMUnavailableError as exc:
                 self.log_msg.emit(f"⚠️ LLM 不可用，降级为关键词匹配: {exc}")
                 hits = keyword_match(context, index)
         else:
+            self.log_msg.emit("🧠 使用关键词匹配...")
             hits = keyword_match(context, index)
+
+        progress_cb(0.85)
+        if not self.running:
+            return []
 
         clips = merge_hits(
             hits, segments,
@@ -188,10 +226,14 @@ class SmartSearchThread(QThread):
             filekey8=filekey8,
             duration=duration,
         )
+        progress_cb(0.88)
 
+        total_clips = max(1, len(clips))
         for idx, clip in enumerate(clips):
             if not self.running:
                 break
+            self.log_msg.emit(f"📦 导出片段 {idx + 1}/{total_clips}...")
+            progress_cb(0.90 + 0.10 * idx / total_clips)
             if not self.force_export and is_already_exported(clip, ledger):
                 clip.already_exported = True
                 entry = ledger.get(export_ledger_key(clip), {})
@@ -211,4 +253,5 @@ class SmartSearchThread(QThread):
                     f"{clip.start:.1f}-{clip.end:.1f}s: {exc}"
                 )
 
+        progress_cb(1.0)
         return clips

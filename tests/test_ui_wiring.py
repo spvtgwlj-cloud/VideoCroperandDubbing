@@ -54,6 +54,70 @@ def test_dialog_close_waits_for_trend_thread(app):
     dialog.close()
 
 
+def test_start_search_shows_visible_status_when_scope_missing(app):
+    from ui.smart_search_dialog import SmartSearchDialog
+
+    dialog = SmartSearchDialog()
+    dialog.input_single.clear()
+    dialog.input_query.setText("price")
+    dialog.start_search()
+
+    assert "请选择有效的视频" in dialog.status_label.text()
+    assert dialog.btn_start.isEnabled()
+    dialog.close()
+
+
+def test_dialog_prefills_scope(app, tmp_path):
+    from ui.smart_search_dialog import SmartSearchDialog
+
+    video = tmp_path / "a.mp4"
+    video.write_bytes(b"x")
+    folder = tmp_path / "batch"
+    folder.mkdir()
+
+    dialog = SmartSearchDialog()
+    dialog.prefill_scope(str(video), str(folder), use_batch=False)
+    assert dialog.input_single.text() == str(video)
+    assert dialog.radio_single.isChecked()
+
+    dialog.prefill_scope(str(video), str(folder), use_batch=True)
+    assert dialog.input_batch.text() == str(folder)
+    assert dialog.radio_batch.isChecked()
+    dialog.close()
+
+
+def test_open_smart_search_prefills_scope_from_main_window(
+    app, monkeypatch, tmp_path,
+):
+    from ui.ui_main import MainWindow
+
+    video = tmp_path / "a.mp4"
+    video.write_bytes(b"x")
+    recorded = {}
+    fake_module = types.ModuleType("ui.smart_search_dialog")
+
+    class _FakeDialog:
+        def __init__(self, parent=None):
+            pass
+
+        def prefill_scope(self, **kwargs):
+            recorded.update(kwargs)
+
+        def exec_(self):
+            return 0
+
+    fake_module.SmartSearchDialog = _FakeDialog
+    monkeypatch.setitem(sys.modules, "ui.smart_search_dialog", fake_module)
+
+    window = MainWindow()
+    window.input_path.setText(str(video))
+    window.open_smart_search()
+
+    assert recorded["single_path"] == str(video)
+    assert recorded["use_batch"] is False
+    window.close()
+
+
 def test_open_smart_search_refuses_while_dubbing(app, monkeypatch):
     from ui.ui_main import MainWindow
 

@@ -341,6 +341,40 @@ def test_feature_flag_can_be_disabled(monkeypatch):
     importlib.reload(core.config)
 
 
+def test_llm_match_sentences_reports_batch_progress():
+    client = _FakeClient([
+        '[{"i":0,"relevant":true,"confidence":0.9,"reason":"ok"}]',
+        '[{"i":0,"relevant":true,"confidence":0.9,"reason":"ok"}]',
+    ])
+    progress = []
+    hits = llm_match_sentences(
+        MatchContext(query="q", angles=[]),
+        ["a", "b"], [0, 1], client, "m", batch_size=1,
+        progress_cb=progress.append,
+    )
+    assert len(hits) == 2
+    assert progress == [0.5, 1.0]
+
+
+def test_llm_match_sentences_stops_between_batches():
+    client = _FakeClient([
+        '[{"i":0,"relevant":true,"confidence":0.9,"reason":"ok"}]',
+    ])
+    calls = {"n": 0}
+
+    def _should_stop():
+        calls["n"] += 1
+        return calls["n"] > 1
+
+    hits = llm_match_sentences(
+        MatchContext(query="q", angles=[]),
+        ["a", "b"], [0, 1], client, "m", batch_size=1,
+        should_stop=_should_stop,
+    )
+    assert len(hits) == 1
+    assert len(client.chat.completions.calls) == 1
+
+
 def test_export_clip_cancels_running_process(monkeypatch, tmp_path):
     monkeypatch.setattr(smart_search, "detect_videotoolbox", lambda: False)
     created = []
