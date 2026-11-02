@@ -6,7 +6,7 @@
 
 import re
 
-from .search_types import Hit, MatchContext, SearchIndex
+from .search_types import Clip, Hit, MatchContext, SearchIndex
 
 # ----------------------------------------------------------------
 # 阈值常量（设计文档 8.4 / 12）
@@ -116,3 +116,115 @@ def prefilter(context: MatchContext, index: SearchIndex,
     if not candidates or len(candidates) < min_candidates:
         return list(range(total))
     return candidates
+
+
+def _split_group(group: list[Hit], segments: list[dict],
+                 max_span: float) -> list[list[Hit]]:
+    """把一组连续命中按 max_span 贪心切成多块。"""
+    chunks: list[list[Hit]] = []
+    current = [group[0]]
+    for hit in group[1:]:
+        block_start = segments[current[0].index]["start"]
+        if segments[hit.index]["end"] - block_start > max_span:
+            chunks.append(current)
+            current = [hit]
+        else:
+            current.append(hit)
+    chunks.append(current)
+    return chunks
+
+
+def _overlaps(a: Clip, b: Clip) -> bool:
+    """两个片段交集占较短片段时长 >= 50% 视为重叠。"""
+    intersection = max(0.0, min(a.end, b.end) - max(a.start, b.start))
+    shorter = min(a.end - a.start, b.end - b.start)
+    return shorter > 0 and intersection / shorter >= 0.5
+
+
+def merge_hits(
+    hits: list[Hit],
+    segments: list[dict],
+    *,
+    min_gap: float = 2.0,
+    pad_before: float = 0.5,
+    pad_after: float = 0.5,
+    min_dur: float = 3.0,
+    max_dur: float = 120.0,
+    top_k: int = 10,
+    source_file: str = "",
+    filekey8: str = "",
+    duration: float | None = None,
+) -> list[Clip]:
+    """合并相邻命中句、加 padding、按句边界切分过长片段并取 Top-K。"""
+    # 1. 丢弃越界 hit，同一 index 只保留最高分
+    best: dict[int, Hit] = {}
+    for hit in hits:
+        if not 0 <= hit.index < len(segments):
+            continue
+        previous = best.get(hit.index)
+        if previous is None or hit.score > previous.score:
+            best[hit.index] = hit
+    if not best:
+        return []
+
+    # 2. 按 segment start 升序
+    ordered = sorted(best.values(), key=lambda h: segments[h.index]["start"])
+
+    # 3. 相邻命中分组
+    groups: list[list[Hit]] = []
+    current = [ordered[0]]
+    for hit in ordered[1:]:
+        previous_seg = segments[current[-1].index]
+        current_seg = segments[hit.index]
+        if current_seg["start"] - previous_seg["end"] <= min_gap:
+            current.append(hit)
+        else:
+            groups.append(current)
+            current = [hit]
+    groups.append(current)
+
+    # 4-6. 每组按句边界切块，应用 padding 与时长过滤
+    max_span = max(0.0, max_dur - pad_before - pad_after)
+    clips: list[Clip] = []
+    for group in groups:
+        for chunk in _split_group(group, segments, max_span):
+            first_seg = segments[chunk[0].index]
+            last_seg = segments[chunk[-1].index]
+            start = max(0.0, first_seg["start"] - pad_before)
+            end = last_seg["end"] + pad_after
+            if duration is not None:
+                end = min(duration, end)
+            if end - start < min_dur:
+                continue
+            reasons: list[str] = []
+            for hit in chunk:
+                if hit.reason and hit.reason not in reasons:
+                    reasons.append(hit.reason)
+            angles: list[str] = []
+            for hit in chunk:
+                for angle in hit.angles:
+                    if angle not in angles:
+                        angles.append(angle)
+            clips.append(Clip(
+                source_file=source_file,
+                filekey8=filekey8,
+                start=start,
+                end=end,
+                matched_sentences=[
+                    segments[hit.index].get("text", "") for hit in chunk
+                ],
+                score=sum(hit.score for hit in chunk) / len(chunk),
+                reason="；".join(reasons)[:200],
+                angles=angles,
+            ))
+
+    # 7. 重叠去重：保留 score 更高者
+    clips.sort(key=lambda clip: clip.score, reverse=True)
+    kept: list[Clip] = []
+    for clip in clips:
+        if any(_overlaps(clip, existing) for existing in kept):
+            continue
+        kept.append(clip)
+
+    # 8. Top-K
+    return kept[:top_k]

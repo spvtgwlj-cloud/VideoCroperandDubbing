@@ -1,7 +1,9 @@
 """智能检索核心逻辑单测。"""
 
+import pytest
+
 from core.search_types import Hit, MatchContext, SearchIndex, TrendAngle
-from core.smart_search import keyword_match, prefilter, tokenize
+from core.smart_search import keyword_match, merge_hits, prefilter, tokenize
 
 
 def _index(texts, duration=60.0):
@@ -58,3 +60,46 @@ def test_prefilter_limits_candidates_when_enough_hits():
     idx = _index(texts, duration=300.0)
     candidates = prefilter(ctx, idx)
     assert 0 < len(candidates) < len(idx.segments)
+
+
+def test_merge_hits_merges_nearby_and_splits_on_gap():
+    segments = [
+        {"start": 10.0, "end": 12.0, "text": "价格一"},
+        {"start": 13.0, "end": 15.0, "text": "价格二"},
+        {"start": 40.0, "end": 42.0, "text": "价格三"},
+    ]
+    hits = [Hit(0, 0.9), Hit(1, 0.8), Hit(2, 0.7)]
+    clips = merge_hits(hits, segments, duration=60.0, top_k=10)
+    assert len(clips) == 2
+    assert clips[0].start == 9.5 and clips[0].end == 15.5
+    assert clips[0].score == pytest.approx(0.85)
+    assert clips[0].matched_sentences == ["价格一", "价格二"]
+    assert clips[1].start == 39.5 and clips[1].end == 42.5
+
+
+def test_merge_hits_clamps_padding_and_drops_short():
+    segments = [{"start": 0.5, "end": 1.5, "text": "短句"}]
+    clips = merge_hits([Hit(0, 0.9)], segments, duration=10.0, min_dur=3.0)
+    assert clips == []
+
+
+def test_merge_hits_splits_long_clip():
+    segments = [
+        {"start": float(i), "end": float(i + 1), "text": f"句{i}"}
+        for i in range(0, 60)
+    ]
+    hits = [Hit(i, 0.8) for i in range(60)]
+    clips = merge_hits(hits, segments, duration=60.0, max_dur=30.0, top_k=100)
+    assert len(clips) > 1
+    assert all(c.end - c.start <= 30.0 for c in clips)
+
+
+def test_merge_hits_top_k_and_duplicate_index():
+    segments = [
+        {"start": 0.0, "end": 10.0, "text": "高"},
+        {"start": 20.0, "end": 30.0, "text": "低"},
+    ]
+    hits = [Hit(0, 0.9), Hit(0, 0.5), Hit(1, 0.4)]
+    clips = merge_hits(hits, segments, duration=60.0, top_k=1)
+    assert len(clips) == 1
+    assert clips[0].score == pytest.approx(0.9)
