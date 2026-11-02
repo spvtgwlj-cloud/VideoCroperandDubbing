@@ -531,6 +531,8 @@ def llm_match_sentences(
     hits: list[Hit] = []
     consecutive_failures = 0
     total = max(1, len(sentences))
+    batch_size = max(1, batch_size)
+    total_batches = (len(sentences) + batch_size - 1) // batch_size
 
     def _report(done: int) -> None:
         if progress_cb is not None:
@@ -545,17 +547,31 @@ def llm_match_sentences(
         batch = sentences[start:start + batch_size]
         batch_indexes = segment_indexes[start:start + batch_size]
         prompt = build_match_prompt(context, batch)
+        batch_no = start // batch_size + 1
+        if log_cb is not None:
+            log_cb(f"🧠 LLM 请求批次 {batch_no}/{total_batches}...")
 
         try:
             raw = _call_llm(client, model, prompt)
-            items = parse_match_response(raw, len(batch))
-            consecutive_failures = 0
         except Exception as exc:
+            # 网络/超时失败：不逐句重试，连续两批后熔断
             consecutive_failures += 1
             if consecutive_failures >= LLM_MAX_CONSECUTIVE_FAILURES:
                 raise LLMUnavailableError(str(exc)) from exc
-            if log_cb:
-                log_cb(f"LLM 批次失败，改单句重试: {exc}")
+            if log_cb is not None:
+                log_cb(f"LLM 请求失败，跳过本批: {exc}")
+            _report(min(start + batch_size, len(sentences)))
+            continue
+
+        try:
+            items = parse_match_response(raw, len(batch))
+        except Exception as exc:
+            # 返回格式错误：才做单句重试
+            consecutive_failures += 1
+            if consecutive_failures >= LLM_MAX_CONSECUTIVE_FAILURES:
+                raise LLMUnavailableError(str(exc)) from exc
+            if log_cb is not None:
+                log_cb(f"LLM 返回格式错误，改单句重试: {exc}")
             for sentence, segment_index in zip(batch, batch_indexes):
                 try:
                     hit = llm_match_sentence(
@@ -568,6 +584,7 @@ def llm_match_sentences(
             _report(min(start + batch_size, len(sentences)))
             continue
 
+        consecutive_failures = 0
         for position, item in enumerate(items):
             local_index = item.get("i", position)
             if not isinstance(local_index, int) or not 0 <= local_index < len(batch_indexes):

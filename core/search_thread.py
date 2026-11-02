@@ -142,7 +142,10 @@ class SmartSearchThread(QThread):
             duration = float(cached.get("duration", 0.0) or 0.0)
             if duration <= 0:
                 duration = probe_duration(video)
-            self.log_msg.emit(f"♻️ 命中转写缓存: {os.path.basename(video)}")
+            self.log_msg.emit(
+                f"♻️ 命中转写缓存（跳过音频提取/Whisper 转写）: "
+                f"{os.path.basename(video)}"
+            )
             progress_cb(0.15)
         else:
             duration = probe_duration(video)

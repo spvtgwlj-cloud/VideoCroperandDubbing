@@ -245,12 +245,24 @@ def test_llm_match_filters_below_confidence_threshold():
 
 
 def test_llm_match_retries_single_sentence_on_batch_failure():
+    # 解析失败（JSON 不合法）才逐句重试
     client = _FakeClient([
-        RuntimeError("batch down"),
+        "not json",
         '{"relevant":true,"confidence":0.7,"reason":"单句重试"}',
     ])
     hits = llm_match_sentences(MatchContext(query="q", angles=[]), ["s"], [2], client, "m")
     assert len(hits) == 1 and hits[0].index == 2
+
+
+def test_llm_match_transport_failure_skips_single_retries():
+    # 网络/超时失败不应逐句重试，连续两批后直接熔断
+    client = _FakeClient([RuntimeError("timeout"), RuntimeError("timeout")])
+    with pytest.raises(LLMUnavailableError):
+        llm_match_sentences(
+            MatchContext(query="q", angles=[]),
+            ["a", "b"], [0, 1], client, "m", batch_size=1,
+        )
+    assert len(client.chat.completions.calls) == 2
 
 
 def test_llm_match_circuit_breaker():

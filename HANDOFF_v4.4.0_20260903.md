@@ -64,10 +64,10 @@
 ### 测试
 
 ```bash
-python3 -m pytest tests/ -q    # 125 passed, 1 skipped
+python3 -m pytest tests/ -q    # 126 passed, 1 skipped
 ```
 
-新增 61 个测试，覆盖关键词匹配/预筛、片段合并、转写缓存、LLM 批量打分与熔断、导出/报告/去重台账、热点抓取/归纳、编排线程、功能开关、UI 线程保护与进度反馈。
+新增 62 个测试，覆盖关键词匹配/预筛、片段合并、转写缓存、LLM 批量打分与熔断、导出/报告/去重台账、热点抓取/归纳、编排线程、功能开关、UI 线程保护与进度反馈。
 
 ### 端到端验证
 
@@ -88,6 +88,8 @@ python3 -m pytest tests/ -q    # 125 passed, 1 skipped
 - 打开检索窗口时自动带入主窗口已选的单文件/批量文件夹。
 - 进度按「提取音频 → 转写 → LLM 打分 → 合并 → 导出」分阶段更新；LLM 每批显示 `X/Y 句`。
 - LLM 打分阶段支持停止，不必等到整批结束。
+- 缓存命中时日志明确提示「跳过音频提取/Whisper 转写」，进度直接从 50% 开始打分。
+- LLM 网络/超时失败不再逐句重试；连续两批失败即降级关键词，避免长时间停在 50%。
 
 ### 分支与回退
 
@@ -120,7 +122,7 @@ core/
 ├── trend_sources.py                    — HN/V2EX 热点抓取（新增）
 ├── trend_thread.py                     — 热点异步抓取线程（新增）
 └── search_thread.py                    — 检索后台线程（新增）
-tests/                                  — 126 个测试（65 基线 + 61 新增）
+tests/                                  — 127 个测试（65 基线 + 62 新增）
 AI视频配音Pro.spec / build.sh           — 打包
 ```
 
@@ -129,7 +131,7 @@ AI视频配音Pro.spec / build.sh           — 打包
 ## 测试
 
 ```bash
-python3 -m pytest tests/ -v    # 125 passed + 1 skipped（126 tests）
+python3 -m pytest tests/ -v    # 126 passed + 1 skipped（127 tests）
 ```
 
 ## 打包
