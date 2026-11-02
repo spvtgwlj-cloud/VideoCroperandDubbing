@@ -142,3 +142,41 @@ def test_summarize_hotspots_falls_back_on_llm_error():
     client = _FakeClient([RuntimeError("down")])
     angles = summarize_hotspots([Hotspot("hn", "价格监控", "u")], client, "m")
     assert angles[0].title == "价格监控"
+
+
+def test_trend_thread_emits_done(monkeypatch):
+    from core.trend_thread import TrendFetchThread
+    monkeypatch.setattr("core.trend_thread.fetch_hotspots", lambda **kw: [Hotspot("hn", "t", "u")])
+    thread = TrendFetchThread()
+    received = []
+    thread.done.connect(received.extend)
+    thread.run()
+    assert received[0].title == "t"
+
+
+def test_trend_thread_emits_angles(monkeypatch):
+    from core.trend_thread import TrendFetchThread
+    monkeypatch.setattr("core.trend_thread.fetch_hotspots", lambda **kw: [Hotspot("hn", "t", "u")])
+    monkeypatch.setattr("core.trend_thread.load_llm_config", lambda: {})
+    monkeypatch.setattr("core.trend_thread.get_translation_config",
+                        lambda cfg: {"api_key": "", "base_url": "", "model": ""})
+    monkeypatch.setattr("core.trend_thread.fallback_angles",
+                        lambda items, max_angles=8: [TrendAngle("兜底", [], "无 Key")])
+    thread = TrendFetchThread(summarize=True)
+    angles = []
+    thread.angles_ready.connect(angles.extend)
+    thread.run()
+    assert angles[0].title == "兜底"
+
+
+def test_trend_thread_emits_failed(monkeypatch):
+    from core.trend_thread import TrendFetchThread
+
+    def _boom(**kw):
+        raise RuntimeError("network down")
+    monkeypatch.setattr("core.trend_thread.fetch_hotspots", _boom)
+    thread = TrendFetchThread()
+    errors = []
+    thread.failed.connect(errors.append)
+    thread.run()
+    assert errors == ["network down"]
