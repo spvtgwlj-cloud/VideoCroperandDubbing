@@ -341,6 +341,36 @@ def test_feature_flag_can_be_disabled(monkeypatch):
     importlib.reload(core.config)
 
 
+def test_export_clip_cancels_running_process(monkeypatch, tmp_path):
+    monkeypatch.setattr(smart_search, "detect_videotoolbox", lambda: False)
+    created = []
+
+    class _FakePopen:
+        def __init__(self, *args, **kwargs):
+            self.returncode = None
+            self.terminated = False
+            created.append(self)
+        def poll(self):
+            return None
+        def terminate(self):
+            self.terminated = True
+            self.returncode = -15
+        def kill(self):
+            self.returncode = -9
+        def wait(self, timeout=None):
+            return self.returncode
+        def communicate(self):
+            return ("", "")
+
+    monkeypatch.setattr(smart_search.subprocess, "Popen", _FakePopen)
+    with pytest.raises(RuntimeError):
+        export_clip(
+            _clip(), "in.mp4", str(tmp_path), "H.264 (MP4)", 4,
+            should_stop=lambda: True,
+        )
+    assert created and created[0].terminated
+
+
 def test_transcribe_audio_tightens_to_word_boundaries(monkeypatch):
     class _FakeModel:
         device = "cpu"

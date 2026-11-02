@@ -64,10 +64,10 @@
 ### 测试
 
 ```bash
-python3 -m pytest tests/ -q    # 114 passed, 1 skipped
+python3 -m pytest tests/ -q    # 119 passed, 1 skipped
 ```
 
-新增 50 个测试，覆盖关键词匹配/预筛、片段合并、转写缓存、LLM 批量打分与熔断、导出/报告/去重台账、热点抓取/归纳、编排线程与功能开关。
+新增 55 个测试，覆盖关键词匹配/预筛、片段合并、转写缓存、LLM 批量打分与熔断、导出/报告/去重台账、热点抓取/归纳、编排线程、功能开关与 UI 线程保护。
 
 ### 端到端验证
 
@@ -77,7 +77,7 @@ python3 -m pytest tests/ -q    # 114 passed, 1 skipped
 
 ### 已知限制
 
-- Whisper `transcribe` 无法中途打断，停止检索需等当前视频处理完。
+- Whisper `transcribe` 无法中途打断；若正在转写，停止需等当前视频处理完。ffmpeg 提取/导出支持取消。
 - HN 网络不稳定时热榜抓取可能失败；不影响仅用提示词检索。
 - 检索窗口当前固定 H.264 / 4 Mbps，未暴露编码/码率控件。
 - GUI 的完整手动点击流程建议发布前再走一遍验收。
@@ -113,7 +113,7 @@ core/
 ├── trend_sources.py                    — HN/V2EX 热点抓取（新增）
 ├── trend_thread.py                     — 热点异步抓取线程（新增）
 └── search_thread.py                    — 检索后台线程（新增）
-tests/                                  — 115 个测试（65 基线 + 50 新增）
+tests/                                  — 120 个测试（65 基线 + 55 新增）
 AI视频配音Pro.spec / build.sh           — 打包
 ```
 
@@ -122,7 +122,7 @@ AI视频配音Pro.spec / build.sh           — 打包
 ## 测试
 
 ```bash
-python3 -m pytest tests/ -v    # 114 passed + 1 skipped（115 tests）
+python3 -m pytest tests/ -v    # 119 passed + 1 skipped（120 tests）
 ```
 
 ## 打包

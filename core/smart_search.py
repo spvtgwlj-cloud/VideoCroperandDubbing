@@ -9,6 +9,7 @@ import json
 import os
 import re
 import subprocess
+import time
 from dataclasses import asdict
 from typing import Any, Callable
 
@@ -307,8 +308,53 @@ def probe_duration(video_path: str) -> float:
         return 0.0
 
 
+def _run_process(cmd: list[str], *, timeout: float,
+                 should_stop: Callable[[], bool] | None = None,
+                 check: bool = False):
+    """运行子进程；提供 should_stop 时用 Popen 轮询并支持取消。"""
+    if should_stop is None:
+        return subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=timeout,
+            check=check,
+        )
+
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    deadline = time.time() + timeout
+    while process.poll() is None:
+        if should_stop():
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+            raise RuntimeError("操作已取消")
+        if time.time() >= deadline:
+            process.kill()
+            raise RuntimeError("ffmpeg 执行超时")
+        time.sleep(0.2)
+
+    stdout, stderr = process.communicate()
+    if check and process.returncode != 0:
+        raise subprocess.CalledProcessError(
+            process.returncode, cmd, output=stdout, stderr=stderr,
+        )
+    return subprocess.CompletedProcess(
+        cmd, process.returncode, stdout, stderr,
+    )
+
+
 def extract_audio(video_path: str, out_wav: str,
-                  log_cb: Callable[[str], None] | None = None) -> None:
+                  log_cb: Callable[[str], None] | None = None,
+                  should_stop: Callable[[], bool] | None = None) -> None:
     """用 ffmpeg 提取单声道 48kHz PCM 音频。"""
     cmd = [
         "ffmpeg", "-y", "-i", video_path,
@@ -318,16 +364,10 @@ def extract_audio(video_path: str, out_wav: str,
     if log_cb:
         log_cb(f"提取音频: {os.path.basename(video_path)}")
     try:
-        subprocess.run(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=True,
-        )
+        _run_process(cmd, timeout=600, should_stop=should_stop, check=True)
     except subprocess.CalledProcessError as exc:
         raise RuntimeError(exc.stderr or "ffmpeg 提取音频失败") from exc
-    except OSError as exc:
+    except (OSError, RuntimeError) as exc:
         raise RuntimeError(str(exc)) from exc
     if not os.path.exists(out_wav) or os.path.getsize(out_wav) <= 0:
         raise RuntimeError("ffmpeg 未生成有效音频文件")
@@ -583,7 +623,8 @@ def build_export_cmd(source: str, out_path: str, start: float, end: float,
 
 def export_clip(clip: Clip, source_path: str, out_dir: str,
                 codec: str, bitrate_mbps: int, timeout: int = 300,
-                idx: int = 0) -> str:
+                idx: int = 0,
+                should_stop: Callable[[], bool] | None = None) -> str:
     """导出单个片段并校验输出文件。"""
     os.makedirs(out_dir, exist_ok=True)
     filename = build_clip_filename(
@@ -593,12 +634,7 @@ def export_clip(clip: Clip, source_path: str, out_dir: str,
     cmd = build_export_cmd(
         source_path, out_path, clip.start, clip.end, codec, bitrate_mbps,
     )
-    result = subprocess.run(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        timeout=timeout,
-    )
+    result = _run_process(cmd, timeout=timeout, should_stop=should_stop)
     returncode = getattr(result, "returncode", 0)
     if (returncode != 0 or not os.path.exists(out_path)
             or os.path.getsize(out_path) <= 0):

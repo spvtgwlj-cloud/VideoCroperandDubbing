@@ -313,9 +313,7 @@ class SmartSearchDialog(QDialog):
         self._trend_thread.done.connect(self._on_trends_done)
         self._trend_thread.angles_ready.connect(self._on_angles_ready)
         self._trend_thread.failed.connect(self._on_trends_failed)
-        self._trend_thread.finished.connect(
-            lambda: self.btn_fetch.setEnabled(True)
-        )
+        self._trend_thread.finished.connect(self._on_trend_finished)
         self._trend_thread.start()
 
     def _on_trends_done(self, items):
@@ -455,9 +453,22 @@ class SmartSearchDialog(QDialog):
         self.btn_fetch.setEnabled(True)
         self.btn_stop.setEnabled(False)
         self.progress.setValue(100)
-        if self._close_when_finished:
-            self._close_when_finished = False
-            self.accept()
+        self._maybe_finish_close()
+
+    def _on_trend_finished(self):
+        self.btn_fetch.setEnabled(True)
+        self._maybe_finish_close()
+
+    def _maybe_finish_close(self):
+        """检索线程与热点线程都结束后，才真正关闭窗口。"""
+        if not self._close_when_finished:
+            return
+        if self._thread is not None and self._thread.isRunning():
+            return
+        if self._trend_thread is not None and self._trend_thread.isRunning():
+            return
+        self._close_when_finished = False
+        self.accept()
 
     def _on_result_double_clicked(self, item):
         path = item.data(Qt.UserRole)
@@ -492,12 +503,14 @@ class SmartSearchDialog(QDialog):
             event.ignore()
             self._thread.stop()
             self._close_when_finished = True
-            self._on_log("⏳ 正在停止（当前视频处理完后退出）...")
+            self._on_log("⏳ 正在停止（当前转写完成后退出）...")
             return
 
         if self._trend_thread is not None and self._trend_thread.isRunning():
-            self._on_log("⏳ 热点抓取仍在进行，等待结束...")
-            self._trend_thread.wait(9000)
+            event.ignore()
+            self._close_when_finished = True
+            self._on_log("⏳ 热点抓取仍在进行，完成后自动关闭...")
+            return
 
         event.accept()
 

@@ -90,7 +90,12 @@ class SmartSearchThread(QThread):
                 try:
                     results.extend(self._process_file(video, context, ledger))
                 except Exception as exc:
-                    self.log_msg.emit(f"⚠️ {video} 处理失败: {exc}")
+                    if not self.running:
+                        self.log_msg.emit(
+                            f"⏹️ 已停止: {os.path.basename(video)}"
+                        )
+                    else:
+                        self.log_msg.emit(f"⚠️ {video} 处理失败: {exc}")
                 self.progress_changed.emit(
                     int((file_pos + 1) / total_files * 100)
                 )
@@ -130,7 +135,10 @@ class SmartSearchThread(QThread):
             duration = probe_duration(video)
             with tempfile.TemporaryDirectory(prefix="smart_search_") as tmp:
                 wav_path = os.path.join(tmp, "audio.wav")
-                extract_audio(video, wav_path, self.log_msg.emit)
+                extract_audio(
+                    video, wav_path, self.log_msg.emit,
+                    should_stop=lambda: not self.running,
+                )
                 data = transcribe_audio(
                     wav_path,
                     model=self._get_whisper_model(),
@@ -182,15 +190,25 @@ class SmartSearchThread(QThread):
         )
 
         for idx, clip in enumerate(clips):
+            if not self.running:
+                break
             if not self.force_export and is_already_exported(clip, ledger):
                 clip.already_exported = True
                 entry = ledger.get(export_ledger_key(clip), {})
                 clip.clip_path = entry.get("path", "")
                 continue
-            clip.clip_path = export_clip(
-                clip, video, self.out_dir, self.codec,
-                self.bitrate_mbps, idx=idx,
-            )
-            mark_exported(clip, clip.clip_path, ledger)
+            try:
+                clip.clip_path = export_clip(
+                    clip, video, self.out_dir, self.codec,
+                    self.bitrate_mbps, idx=idx,
+                    should_stop=lambda: not self.running,
+                )
+                mark_exported(clip, clip.clip_path, ledger)
+            except Exception as exc:
+                clip.clip_path = ""
+                self.log_msg.emit(
+                    f"⚠️ 片段导出失败 "
+                    f"{clip.start:.1f}-{clip.end:.1f}s: {exc}"
+                )
 
         return clips

@@ -1029,6 +1029,8 @@ class MainWindow(QMainWindow):
         """打开智能检索对话框（懒加载，失败不影响主程序）"""
         if not ENABLE_SMART_SEARCH:
             return self.log("ℹ️ 智能检索功能已关闭")
+        if self.thread is not None and self.thread.isRunning():
+            return self.log("⚠️ 配音处理中，请完成后再使用智能检索")
         try:
             from ui.smart_search_dialog import SmartSearchDialog
             SmartSearchDialog(self).exec_()

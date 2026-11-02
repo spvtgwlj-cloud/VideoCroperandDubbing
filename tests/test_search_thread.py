@@ -86,3 +86,29 @@ def test_thread_stop_before_first_file(monkeypatch):
     thread.results_ready.connect(results.extend)
     thread.run()
     assert results == []
+
+
+def test_thread_continues_after_clip_export_failure(monkeypatch):
+    _patch_pipeline(monkeypatch)
+    clips = [_clip("a.mp4", 1.0, 10.0), _clip("a.mp4", 20.0, 30.0)]
+    monkeypatch.setattr(st, "merge_hits", lambda *a, **k: clips)
+
+    calls = {"n": 0}
+    def _export(*a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("disk full")
+        return "/tmp/clip2.mp4"
+    monkeypatch.setattr(st, "export_clip", _export)
+
+    thread = st.SmartSearchThread(["a.mp4"], "价格", [], "H.264 (MP4)", 4, "/tmp/out")
+    results = []
+    logs = []
+    thread.results_ready.connect(results.extend)
+    thread.log_msg.connect(logs.append)
+    thread.run()
+
+    assert len(results) == 2
+    assert results[0].clip_path == ""
+    assert results[1].clip_path == "/tmp/clip2.mp4"
+    assert any("disk full" in message for message in logs)
