@@ -20,7 +20,7 @@ from sklearn.cluster import AgglomerativeClustering
 from sklearn.preprocessing import normalize
 from speechbrain.inference.speaker import EncoderClassifier
 
-from .config import DASHSCOPE_API_KEY, AI_BASE_URL, EDGE_TTS_DEFAULT
+from .config import EDGE_TTS_DEFAULT
 from .voice_cloner import create_cloned_voice as _create_cloned_voice
 
 
@@ -249,7 +249,7 @@ class AudioPipelineMixin:
                 )
                 try:
                     response = self.llm_client.chat.completions.create(
-                        model="qwen-max", messages=[{"role": "user", "content": prompt}], temperature=0.3
+                        model=self.llm_model, messages=[{"role": "user", "content": prompt}], temperature=0.3
                     )
                     trans_text = response.choices[0].message.content.strip()
                     if not trans_text:
@@ -432,7 +432,7 @@ class AudioPipelineMixin:
                     original_text = seg["text"].strip()
                     try:
                         response = self.llm_client.chat.completions.create(
-                            model="qwen-max",
+                            model=self.llm_model,
                             messages=[{"role": "user", "content": (
                                 f"Translate the following text to {self.target_lang}. "
                                 f"Keep the translation strictly concise. "
@@ -488,7 +488,7 @@ class AudioPipelineMixin:
                     )
                     try:
                         response = self.llm_client.chat.completions.create(
-                            model="qwen-max", messages=[{"role": "user", "content": prompt}], temperature=0.3
+                            model=self.llm_model, messages=[{"role": "user", "content": prompt}], temperature=0.3
                         )
                         trans_text = response.choices[0].message.content.strip()
                         if not trans_text:

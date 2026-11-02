@@ -77,6 +77,7 @@ def mock_thread():
     mock.target_lang = "中文 (Chinese) - 自动翻译生成"
     mock.dashscope_api_key = "test-key"
     mock.cosy_model = "cosyvoice-v2"
+    mock.llm_model = "qwen-max"
     mock.log_msg = MagicMock()
     mock.progress_changed = MagicMock()
     mock.update_frame = MagicMock()

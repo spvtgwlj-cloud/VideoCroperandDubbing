@@ -5,6 +5,7 @@
     python entry.py
 """
 
+import os
 import sys
 import warnings
 
@@ -24,6 +25,22 @@ if __name__ == "__main__":
     splash.show()
     app.processEvents()
 
+    # 检查 API 配置（首次运行无配置时弹出设置对话框）
+    from core.llm_config import load_llm_config
+    splash.set_status("正在检查 API 配置...")
+    app.processEvents()
+    config = load_llm_config()
+    translation_key = config.get("translation", {}).get("api_key", "")
+    env_key = os.environ.get("DASHSCOPE_API_KEY", "")
+    if not translation_key and not env_key:
+        from ui.api_config_dialog import ApiConfigDialog
+        splash.set_status("首次使用，请配置 API...")
+        app.processEvents()
+        dialog = ApiConfigDialog(config)
+        dialog.exec_()
+
+    splash.set_status("正在加载主界面...")
+    app.processEvents()
     window = MainWindow()
     window.show()
     splash.finish(window)

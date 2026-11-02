@@ -3,13 +3,13 @@
 import os
 
 # ==========================================
-# AI 大模型配置 (阿里云通义千问) — 直接修改此处
+# AI 大模型配置 — 由 llm_config.py 统一管理
+# （API Key / Base URL / 模型名 通过 core.llm_config 加载）
 # ==========================================
-DASHSCOPE_API_KEY = "sk-bee6589163b94d20857955a69c53ef6b"
-AI_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-# 环境变量可覆盖上述默认值（CI/共享机器场景）
-DASHSCOPE_API_KEY = os.environ.get("DASHSCOPE_API_KEY", DASHSCOPE_API_KEY)
-AI_BASE_URL = os.environ.get("DASHSCOPE_BASE_URL", AI_BASE_URL)
+from .llm_config import (
+    load_llm_config, get_translation_config, get_voice_clone_config,
+    LLM_PROVIDERS, DEFAULT_TRANSLATION_MODEL, DEFAULT_COSY_MODEL,
+)
 
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 

@@ -12,7 +12,7 @@ from PyQt5.QtGui import QImage
 from openai import OpenAI
 from insightface.app import FaceAnalysis
 
-from .config import DASHSCOPE_API_KEY, AI_BASE_URL, PLATFORM_PRESETS
+from .config import PLATFORM_PRESETS
 from .audio_pipeline import AudioPipelineMixin
 from .video_processor import VideoProcessorMixin
 
@@ -42,7 +42,17 @@ class VideoProcessThread(QThread, AudioPipelineMixin, VideoProcessorMixin):
                  highlight_dur_sec=3,
                  bitrate_mbps=4,
                  chapters=None,
-                 multi_platforms=None):
+                 multi_platforms=None,
+                 # ---- LLM / TTS API 配置参数 ----
+                 translation_api_key="",
+                 translation_base_url="",
+                 translation_model="qwen-max",
+                 tts_api_key="",
+                 cosy_model="cosyvoice-v2",
+                 voice_clone_use_separate=False,
+                 voice_clone_api_key="",
+                 voice_clone_base_url="",
+                 voice_clone_model="qwen-max"):
         super().__init__()
         self.input_source = input_source
         self.is_vertical = is_vertical
@@ -85,10 +95,30 @@ class VideoProcessThread(QThread, AudioPipelineMixin, VideoProcessorMixin):
 
         self.output_dir, self.temp_video, self.orig_audio, self.final_audio, self.final_output = self.prepare_output_env()
         self.video_writer = None
-        self.llm_client = OpenAI(api_key=DASHSCOPE_API_KEY, base_url=AI_BASE_URL)
 
-        self.cosy_model = "cosyvoice-v2"
-        self.dashscope_api_key = DASHSCOPE_API_KEY
+        # 解析有效的 LLM 配置（声音克隆可独立配置）
+        if self.enable_voice_clone and voice_clone_use_separate and voice_clone_api_key:
+            effective_key = voice_clone_api_key
+            effective_url = voice_clone_base_url
+            effective_model = voice_clone_model
+        else:
+            effective_key = translation_api_key
+            effective_url = translation_base_url
+            effective_model = translation_model
+
+        # 回退到环境变量（兼容旧版 CI/共享机器场景）
+        if not effective_key:
+            effective_key = os.environ.get("DASHSCOPE_API_KEY", "")
+        if not effective_url:
+            effective_url = os.environ.get(
+                "DASHSCOPE_BASE_URL",
+                "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            )
+
+        self.llm_client = OpenAI(api_key=effective_key, base_url=effective_url)
+        self.llm_model = effective_model
+        self.cosy_model = cosy_model
+        self.dashscope_api_key = tts_api_key or effective_key
 
     def prepare_output_env(self, suffix=""):
         """创建输出目录并生成所有临时/最终文件的路径"""
