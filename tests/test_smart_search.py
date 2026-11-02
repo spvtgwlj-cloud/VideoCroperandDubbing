@@ -387,6 +387,15 @@ def test_llm_match_sentences_stops_between_batches():
     assert len(client.chat.completions.calls) == 1
 
 
+def test_keyword_match_supports_relaxed_min_score():
+    ctx = MatchContext(query="谷歌 、google agent 、AI", angles=[])
+    idx = _index(["With world models, AI is moving from predicting text."])
+    assert keyword_match(ctx, idx) == []
+    hits = keyword_match(ctx, idx, min_score=0.0)
+    assert len(hits) == 1
+    assert hits[0].score == pytest.approx(0.25)
+
+
 def test_export_clip_cancels_running_process(monkeypatch, tmp_path):
     monkeypatch.setattr(smart_search, "detect_videotoolbox", lambda: False)
     created = []

@@ -71,8 +71,13 @@ def build_index(segments: list[dict], source_file: str,
     )
 
 
-def keyword_match(context: MatchContext, index: SearchIndex) -> list[Hit]:
-    """关键词/2-gram 覆盖打分，作为 LLM 不可用时的兜底。"""
+def keyword_match(context: MatchContext, index: SearchIndex,
+                  min_score: float = KEYWORD_HIT_SCORE) -> list[Hit]:
+    """关键词/2-gram 覆盖打分，作为 LLM 不可用时的兜底。
+
+    min_score 可传 0.0 做“放宽兜底”：只要命中任意 token 就保留，
+    用于混合语言/多 token 查询把得分压低而导致的假阴性。
+    """
     context_tokens = _context_tokens(context)
     if not context_tokens:
         return []
@@ -82,7 +87,7 @@ def keyword_match(context: MatchContext, index: SearchIndex) -> list[Hit]:
         segment_tokens = set(tokenize(segment.get("text", "")))
         matched = segment_tokens & context_tokens
         score = len(matched) / max(1, len(context_tokens))
-        if score < KEYWORD_HIT_SCORE:
+        if score < min_score:
             continue
 
         angle_titles: list[str] = []

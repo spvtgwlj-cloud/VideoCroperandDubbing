@@ -88,6 +88,52 @@ def test_thread_stop_before_first_file(monkeypatch):
     assert results == []
 
 
+def test_thread_relaxes_keyword_fallback_when_no_hits(monkeypatch):
+    _patch_pipeline(monkeypatch)
+    calls = {"strict": 0, "relaxed": 0}
+
+    def _kw(ctx, idx, min_score=0.3):
+        if min_score == 0.0:
+            calls["relaxed"] += 1
+            return [Hit(0, 0.25)]
+        calls["strict"] += 1
+        return []
+
+    monkeypatch.setattr(st, "keyword_match", _kw)
+    thread = st.SmartSearchThread(
+        ["a.mp4"], "谷歌 、google agent 、AI", [], "H.264 (MP4)", 4, "/tmp/out",
+    )
+    results = []
+    logs = []
+    thread.results_ready.connect(results.extend)
+    thread.log_msg.connect(logs.append)
+    thread.run()
+
+    assert calls == {"strict": 1, "relaxed": 1}
+    assert len(results) == 1
+    assert any("放宽" in message for message in logs)
+
+
+def test_thread_report_includes_diagnostics(monkeypatch):
+    _patch_pipeline(monkeypatch)
+    captured = {}
+
+    def _report(results, out_dir, meta=None):
+        captured["meta"] = meta
+        return "/tmp/report.json"
+
+    monkeypatch.setattr(st, "export_report", _report)
+    thread = st.SmartSearchThread(
+        ["a.mp4"], "价格", [], "H.264 (MP4)", 4, "/tmp/out", deep_mode=True,
+    )
+    thread.run()
+
+    meta = captured["meta"]
+    assert meta["deep_mode"] is True
+    assert "stats" in meta
+    assert meta["stats"]["clips"] == 1
+
+
 def test_thread_emits_intermediate_progress(monkeypatch):
     _patch_pipeline(monkeypatch)
     thread = st.SmartSearchThread(["a.mp4"], "价格", [], "H.264 (MP4)", 4, "/tmp/out")

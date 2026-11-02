@@ -51,6 +51,9 @@ class SmartSearchThread(QThread):
         self._client = None
         self._model = ""
         self._whisper_model = None
+        self._llm_enabled = False
+        self._hit_count = 0
+        self._relaxed_fallback_used = False
 
     def stop(self) -> None:
         """请求停止；当前文件转写完成后不再开始下一个文件。"""
@@ -91,6 +94,7 @@ class SmartSearchThread(QThread):
         try:
             ledger = load_export_ledger()
             self._client, self._model = self._resolve_llm()
+            self._llm_enabled = self._client is not None
             context = MatchContext(query=self.query, angles=self.angles)
             total_files = max(1, len(self.scope_files))
 
@@ -126,6 +130,18 @@ class SmartSearchThread(QThread):
                     "query": self.query,
                     "angles": [angle.title for angle in self.angles],
                     "files": self.scope_files,
+                    "deep_mode": self.deep_mode,
+                    "llm_enabled": self._llm_enabled,
+                    "stats": {
+                        "hits": self._hit_count,
+                        "clips": len(results),
+                        "relaxed_fallback_used": self._relaxed_fallback_used,
+                    },
+                    "message": (
+                        "" if results
+                        else "未找到匹配片段；已尝试 LLM 与关键词兜底，"
+                             "可尝试更具体的关键词或关闭深度模式"
+                    ),
                 })
             except Exception as exc:
                 self.log_msg.emit(f"⚠️ 报告保存失败: {exc}")
@@ -213,6 +229,17 @@ class SmartSearchThread(QThread):
             self.log_msg.emit("🧠 使用关键词匹配...")
             hits = keyword_match(context, index)
 
+        if not hits:
+            relaxed_hits = keyword_match(context, index, min_score=0.0)
+            if relaxed_hits:
+                hits = relaxed_hits
+                self._relaxed_fallback_used = True
+                self.log_msg.emit(
+                    "⚠️ 未找到强匹配，已放宽关键词兜底"
+                    "（可能包含较弱片段，请人工复核）"
+                )
+
+        self._hit_count += len(hits)
         progress_cb(0.85)
         if not self.running:
             return []
