@@ -8,6 +8,8 @@ import hashlib
 import json
 import os
 import re
+import subprocess
+from typing import Any, Callable
 
 from .search_types import Clip, Hit, MatchContext, SearchIndex
 
@@ -282,3 +284,69 @@ def save_cached_transcript(key: str, data: dict) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def probe_duration(video_path: str) -> float:
+    """用 ffprobe 读取视频时长（秒）；失败返回 0.0。"""
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=nw=1:nk=1",
+                video_path,
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=30,
+        )
+        return float(result.stdout.strip())
+    except Exception:
+        return 0.0
+
+
+def extract_audio(video_path: str, out_wav: str,
+                  log_cb: Callable[[str], None] | None = None) -> None:
+    """用 ffmpeg 提取单声道 48kHz PCM 音频。"""
+    cmd = [
+        "ffmpeg", "-y", "-i", video_path,
+        "-vn", "-acodec", "pcm_s16le", "-ar", "48000", "-ac", "1",
+        out_wav,
+    ]
+    if log_cb:
+        log_cb(f"提取音频: {os.path.basename(video_path)}")
+    try:
+        subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(exc.stderr or "ffmpeg 提取音频失败") from exc
+    except OSError as exc:
+        raise RuntimeError(str(exc)) from exc
+    if not os.path.exists(out_wav) or os.path.getsize(out_wav) <= 0:
+        raise RuntimeError("ffmpeg 未生成有效音频文件")
+
+
+def transcribe_audio(audio_path: str, model: Any = None,
+                     model_name: str = "turbo",
+                     log_cb: Callable[[str], None] | None = None) -> dict:
+    """用 Whisper 转写，返回未压缩 segments。
+
+    这里只返回 Whisper 的原始 result["segments"]。
+    禁止调用 _compress_silence()，禁止复用配音管线的 subtitles_timeline
+    （其时间戳已平移、文本已是译文）。
+    """
+    if model is None:
+        import whisper
+        model = whisper.load_model(model_name)
+    fp16 = getattr(model, "device", None) == "mps"
+    result = model.transcribe(audio_path, fp16=fp16)
+    return {
+        "segments": result.get("segments", []),
+        "language": result.get("language", ""),
+    }

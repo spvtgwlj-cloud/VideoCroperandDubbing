@@ -1,15 +1,16 @@
 """智能检索核心逻辑单测。"""
 
 import os
+import sys
 
 import pytest
 
 import core.smart_search as smart_search
 from core.search_types import Hit, MatchContext, SearchIndex, TrendAngle
 from core.smart_search import (
-    keyword_match, load_cached_transcript, merge_hits, prefilter,
-    save_cached_transcript, tokenize, transcript_cache_key,
-    transcript_cache_path,
+    extract_audio, keyword_match, load_cached_transcript, merge_hits,
+    prefilter, probe_duration, save_cached_transcript, tokenize,
+    transcribe_audio, transcript_cache_key, transcript_cache_path,
 )
 
 
@@ -138,3 +139,59 @@ def test_transcript_cache_corrupt_returns_none(tmp_path, monkeypatch):
     with open(path, "w", encoding="utf-8") as f:
         f.write("{not json")
     assert load_cached_transcript("badbad") is None
+
+
+def test_probe_duration_parses_ffprobe(monkeypatch):
+    class _Result:
+        returncode = 0
+        stdout = "12.34\n"
+        stderr = ""
+    monkeypatch.setattr(smart_search.subprocess, "run", lambda *a, **k: _Result())
+    assert probe_duration("demo.mp4") == pytest.approx(12.34)
+
+
+def test_probe_duration_returns_zero_on_failure(monkeypatch):
+    def _boom(*a, **k):
+        raise FileNotFoundError("ffprobe")
+    monkeypatch.setattr(smart_search.subprocess, "run", _boom)
+    assert probe_duration("demo.mp4") == 0.0
+
+
+def test_extract_audio_builds_ffmpeg_command(monkeypatch, tmp_path):
+    calls = []
+
+    def _run(cmd, **kwargs):
+        calls.append(cmd)
+        (tmp_path / "out.wav").write_bytes(b"wav")
+
+    monkeypatch.setattr(smart_search.subprocess, "run", _run)
+    extract_audio("demo.mp4", str(tmp_path / "out.wav"))
+    cmd = calls[0]
+    assert "-vn" in cmd and "pcm_s16le" in cmd
+    assert cmd[cmd.index("-ar") + 1] == "48000"
+    assert cmd[cmd.index("-ac") + 1] == "1"
+    assert "-y" in cmd
+
+
+def test_transcribe_audio_returns_uncompressed_segments(monkeypatch):
+    captured = {}
+
+    class _FakeModel:
+        device = "cpu"
+        def transcribe(self, path, **kwargs):
+            captured["path"] = path
+            captured["kwargs"] = kwargs
+            return {"segments": [{"start": 0.0, "end": 1.0, "text": "hi"}], "language": "en"}
+
+    class _FakeWhisper:
+        @staticmethod
+        def load_model(name):
+            captured["model_name"] = name
+            return _FakeModel()
+
+    monkeypatch.setitem(sys.modules, "whisper", _FakeWhisper)
+    result = transcribe_audio("a.wav", model_name="turbo")
+    assert result["segments"] == [{"start": 0.0, "end": 1.0, "text": "hi"}]
+    assert result["language"] == "en"
+    assert captured["model_name"] == "turbo"
+    assert captured["path"] == "a.wav"
