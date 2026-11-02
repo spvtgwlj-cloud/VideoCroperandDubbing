@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import asdict
@@ -9,7 +10,7 @@ from typing import Any
 
 import requests
 
-from .search_types import Hotspot
+from .search_types import Hotspot, TrendAngle
 
 TREND_CACHE_DIR = os.path.join(
     os.path.expanduser("~"), ".ai_video_dubbing_pro", "smart_search"
@@ -142,3 +143,118 @@ def save_trend_cache(source: str, items: list[Hotspot]) -> None:
     }
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
+
+
+_LATIN_RE = re.compile(r"[a-z0-9]+")
+_CJK_RE = re.compile(r"[一-鿿]+")
+_EN_STOPWORDS = {
+    "the", "a", "an", "is", "are", "to", "of", "and", "or", "for",
+    "in", "on", "with",
+}
+_CJK_STOPWORDS = set("的了是在和与就都也很我你他")
+
+
+def extract_keywords(text: str, max_keywords: int = 6) -> list[str]:
+    """提取高频关键词：拉丁词 + CJK 2-gram，去掉常见虚词。"""
+    if not text:
+        return []
+    lowered = text.lower()
+    tokens = _LATIN_RE.findall(lowered)
+    for run in _CJK_RE.findall(lowered):
+        if len(run) == 1:
+            tokens.append(run)
+        else:
+            tokens.extend(run[i:i + 2] for i in range(len(run) - 1))
+
+    counts: dict[str, int] = {}
+    first_pos: dict[str, int] = {}
+    for pos, token in enumerate(tokens):
+        if token in _EN_STOPWORDS:
+            continue
+        if _CJK_RE.fullmatch(token) and any(
+            ch in _CJK_STOPWORDS for ch in token
+        ):
+            continue
+        counts[token] = counts.get(token, 0) + 1
+        first_pos.setdefault(token, pos)
+
+    ordered = sorted(counts, key=lambda token: (-counts[token], first_pos[token]))
+    return ordered[:max_keywords]
+
+
+def fallback_angles(items: list[Hotspot],
+                    max_angles: int = 8) -> list[TrendAngle]:
+    """LLM 不可用时的兜底：每条热点标题直接作为一个角度。"""
+    angles: list[TrendAngle] = []
+    for item in items[:max_angles]:
+        angles.append(TrendAngle(
+            title=item.title,
+            keywords=extract_keywords(item.title),
+            why="原始热点",
+            source_ids=[f"{item.source}:{item.url}"],
+        ))
+    return angles
+
+
+def _strip_code_fence(raw: str) -> str:
+    text = (raw or "").strip()
+    text = re.sub(r"^```[a-zA-Z]*\s*", "", text)
+    text = re.sub(r"\s*```$", "", text)
+    return text.strip()
+
+
+def summarize_hotspots(items: list[Hotspot], client: Any, model: str,
+                       max_angles: int = 8) -> list[TrendAngle]:
+    """用 LLM 把热点归纳成爆点角度；任何失败都退回原始标题。"""
+    if not items:
+        return []
+
+    lines = [
+        "你是内容选题分析助手。根据以下 HN/V2EX 热点，"
+        "归纳出适合在短视频中制作的爆点角度。",
+        '只返回 JSON：{"angles":[{"title":"角度标题","keywords":["关键词"],'
+        '"why":"推荐理由","source_ids":["来源:链接"]}]}',
+        f"最多 {max_angles} 个角度。",
+        "",
+        "热点列表:",
+    ]
+    for item in items[:40]:
+        lines.append(
+            f"- [{item.source}] {item.title} | 热度 {item.score} | {item.url}"
+        )
+
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": "\n".join(lines)}],
+            temperature=0.3,
+            timeout=30,
+        )
+        raw = response.choices[0].message.content
+        data = json.loads(_strip_code_fence(raw))
+        raw_angles = data.get("angles") if isinstance(data, dict) else None
+        if not isinstance(raw_angles, list):
+            return fallback_angles(items, max_angles)
+
+        angles: list[TrendAngle] = []
+        for entry in raw_angles[:max_angles]:
+            if not isinstance(entry, dict):
+                continue
+            title = str(entry.get("title", "")).strip()
+            if not title:
+                continue
+            keywords = entry.get("keywords")
+            if not isinstance(keywords, list):
+                keywords = []
+            source_ids = entry.get("source_ids")
+            if not isinstance(source_ids, list):
+                source_ids = []
+            angles.append(TrendAngle(
+                title=title,
+                keywords=[str(keyword) for keyword in keywords],
+                why=str(entry.get("why", "")),
+                source_ids=[str(source_id) for source_id in source_ids],
+            ))
+        return angles or fallback_angles(items, max_angles)
+    except Exception:
+        return fallback_angles(items, max_angles)

@@ -1,9 +1,11 @@
 """HN / V2EX 热点抓取与缓存单测。"""
 
+from types import SimpleNamespace
+
 from core.search_types import Hotspot, TrendAngle
 from core.trend_sources import (
-    fetch_hn, fetch_v2ex, fetch_hotspots,
-    load_trend_cache, save_trend_cache,
+    extract_keywords, fallback_angles, fetch_hn, fetch_v2ex, fetch_hotspots,
+    load_trend_cache, save_trend_cache, summarize_hotspots,
 )
 import core.trend_sources as trend_sources
 
@@ -84,3 +86,59 @@ def test_trend_cache_expires(tmp_path, monkeypatch):
     save_trend_cache("hn", [Hotspot("hn", "t", "u")])
     monkeypatch.setattr(trend_sources.time, "time", lambda: 10**12)
     assert load_trend_cache("hn", ttl_seconds=60) is None
+
+
+class _FakeCompletions:
+    def __init__(self, responses):
+        self.responses = list(responses)
+    def create(self, **kwargs):
+        item = self.responses.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=item))]
+        )
+
+
+class _FakeClient:
+    def __init__(self, responses):
+        self.chat = SimpleNamespace(completions=_FakeCompletions(responses))
+
+
+def test_extract_keywords_cjk_and_latin():
+    kws = extract_keywords("价格 price monitor 价格 监控")
+    assert "价格" in kws and "price" in kws
+    assert len(kws) <= 6
+
+
+def test_fallback_angles_one_per_item():
+    items = [Hotspot("hn", "价格监控工具", "u"), Hotspot("v2ex", "AI 剪辑", "u2")]
+    angles = fallback_angles(items, max_angles=8)
+    assert len(angles) == 2
+    assert angles[0].title == "价格监控工具"
+    assert angles[0].why == "原始热点"
+
+
+def test_summarize_hotspots_parses_json():
+    client = _FakeClient(['{"angles":[{"title":"成本焦虑","keywords":["价格","省钱"],"why":"高热","source_ids":["hn:1"]}]}'])
+    angles = summarize_hotspots([Hotspot("hn", "价格", "u")], client, "m")
+    assert angles[0].title == "成本焦虑"
+    assert angles[0].keywords == ["价格", "省钱"]
+
+
+def test_summarize_hotspots_accepts_code_fence():
+    client = _FakeClient(['```json\n{"angles":[{"title":"角度","keywords":[],"why":"x"}]}\n```'])
+    angles = summarize_hotspots([Hotspot("hn", "价格", "u")], client, "m")
+    assert angles[0].title == "角度"
+
+
+def test_summarize_hotspots_falls_back_on_invalid_json():
+    client = _FakeClient(["not json"])
+    angles = summarize_hotspots([Hotspot("hn", "价格监控", "u")], client, "m")
+    assert angles[0].title == "价格监控"
+
+
+def test_summarize_hotspots_falls_back_on_llm_error():
+    client = _FakeClient([RuntimeError("down")])
+    angles = summarize_hotspots([Hotspot("hn", "价格监控", "u")], client, "m")
+    assert angles[0].title == "价格监控"
