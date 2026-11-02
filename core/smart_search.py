@@ -333,12 +333,25 @@ def extract_audio(video_path: str, out_wav: str,
         raise RuntimeError("ffmpeg 未生成有效音频文件")
 
 
+def _tighten_segment_boundaries(segments: list[dict]) -> None:
+    """用词级时间戳收紧 segment 首尾，去掉前后静音；不改变时间轴。"""
+    for segment in segments:
+        words = segment.get("words") or []
+        if not words:
+            continue
+        try:
+            segment["start"] = float(words[0]["start"])
+            segment["end"] = float(words[-1]["end"])
+        except (KeyError, TypeError, ValueError):
+            continue
+
+
 def transcribe_audio(audio_path: str, model: Any = None,
                      model_name: str = "turbo",
                      log_cb: Callable[[str], None] | None = None) -> dict:
     """用 Whisper 转写，返回未压缩 segments。
 
-    这里只返回 Whisper 的原始 result["segments"]。
+    只使用 Whisper 的原始 segments 与词级时间戳，
     禁止调用 _compress_silence()，禁止复用配音管线的 subtitles_timeline
     （其时间戳已平移、文本已是译文）。
     """
@@ -346,9 +359,17 @@ def transcribe_audio(audio_path: str, model: Any = None,
         import whisper
         model = whisper.load_model(model_name)
     fp16 = getattr(model, "device", None) == "mps"
-    result = model.transcribe(audio_path, fp16=fp16)
+    try:
+        result = model.transcribe(
+            audio_path, fp16=fp16, word_timestamps=True,
+        )
+    except Exception:
+        # 某些模型/环境不支持词级时间戳，退回 segment 级
+        result = model.transcribe(audio_path, fp16=fp16)
+    segments = result.get("segments", [])
+    _tighten_segment_boundaries(segments)
     return {
-        "segments": result.get("segments", []),
+        "segments": segments,
         "language": result.get("language", ""),
     }
 

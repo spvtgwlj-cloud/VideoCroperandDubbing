@@ -339,3 +339,30 @@ def test_feature_flag_can_be_disabled(monkeypatch):
     assert core.config.ENABLE_SMART_SEARCH is False
     monkeypatch.delenv("AI_VIDEO_SMART_SEARCH")
     importlib.reload(core.config)
+
+
+def test_transcribe_audio_tightens_to_word_boundaries(monkeypatch):
+    class _FakeModel:
+        device = "cpu"
+        def transcribe(self, path, **kwargs):
+            return {
+                "segments": [{
+                    "start": 0.0, "end": 7.5, "text": "The price",
+                    "words": [
+                        {"start": 5.0, "end": 5.4, "word": "The"},
+                        {"start": 5.4, "end": 7.2, "word": "price"},
+                    ],
+                }],
+                "language": "en",
+            }
+
+    class _FakeWhisper:
+        @staticmethod
+        def load_model(name):
+            return _FakeModel()
+
+    monkeypatch.setitem(sys.modules, "whisper", _FakeWhisper)
+    result = transcribe_audio("a.wav", model_name="turbo")
+    assert result["segments"][0]["start"] == 5.0
+    assert result["segments"][0]["end"] == 7.2
+    assert result["segments"][0]["text"] == "The price"

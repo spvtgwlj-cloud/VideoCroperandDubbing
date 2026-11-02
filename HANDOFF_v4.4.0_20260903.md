@@ -10,7 +10,7 @@
 
 ## v4.4.0 核心规划（2026-09-03）
 
-> ⚠️ 本版本为**设计规划**，代码尚未实现。完整设计见 `基于原配音程序上的智能视频搜索产品功能实施设计20260903.md`。
+> ✅ 本版本已完成实现（2026-11-02）。完整设计见 `智能视频检索v4.4.0设计方案20261102.md`，实施计划见 `docs/superpowers/plans/2026-11-02-smart-search.md`。
 
 ### 1. 智能视频搜索（新增功能）
 
@@ -39,14 +39,67 @@
 
 ---
 
-## 架构（v4.4.0 规划）
+## 实施状态（2026-11-02）
+
+### 新增文件
+
+| 文件 | 说明 |
+|------|------|
+| `core/search_types.py` | 共享 dataclass |
+| `core/smart_search.py` | 检索纯逻辑（转写/缓存/打分/合并/导出/报告/台账） |
+| `core/trend_sources.py` | HN/V2EX 抓取、缓存、关键词、自动归纳 |
+| `core/trend_thread.py` | `TrendFetchThread` 异步抓取/归纳 |
+| `core/search_thread.py` | `SmartSearchThread` 编排全流程 |
+| `ui/smart_search_dialog.py` | 独立检索对话框 |
+| `tests/test_smart_search.py` | 检索核心 + 功能开关测试 |
+| `tests/test_trend_sources.py` | 热点 + TrendFetchThread 测试 |
+| `tests/test_search_thread.py` | 编排线程测试 |
+
+### 修改文件
+
+- `core/config.py`：新增 `ENABLE_SMART_SEARCH`（`AI_VIDEO_SMART_SEARCH=0` 可关闭）
+- `ui/ui_main.py`：「🔑 AI 大模型设置」右侧新增「🔍 智能检索」按钮 + 懒加载入口
+- `AI视频配音Pro.spec`：新增 6 个 hiddenimports
+
+### 测试
+
+```bash
+python3 -m pytest tests/ -q    # 114 passed, 1 skipped
+```
+
+新增 50 个测试，覆盖关键词匹配/预筛、片段合并、转写缓存、LLM 批量打分与熔断、导出/报告/去重台账、热点抓取/归纳、编排线程与功能开关。
+
+### 端到端验证
+
+- 生成 15 秒测试视频，语音真实起点 5.0s。
+- Whisper 词级时间戳收紧后转写为 4.52–7.06s；导出片段 4.02–7.56s（误差 < 0.5s）。
+- 转写缓存命中、`search_results.json` 生成、H.264 片段导出均验证通过。
+
+### 已知限制
+
+- Whisper `transcribe` 无法中途打断，停止检索需等当前视频处理完。
+- HN 网络不稳定时热榜抓取可能失败；不影响仅用提示词检索。
+- 检索窗口当前固定 H.264 / 4 Mbps，未暴露编码/码率控件。
+- GUI 的完整手动点击流程建议发布前再走一遍验收。
+
+### 分支与回退
+
+- 基线：`abff400` / 标签 `v4.3.4-baseline`
+- 开发分支：`feature/v4.4.0-smart-search`
+- 运行时关闭：`AI_VIDEO_SMART_SEARCH=0`
+- 代码回退：`git checkout v4.3.4-baseline`
+
+---
+
+## 架构（v4.4.0）
 
 ```
 entry.py                                — 主入口（SplashScreen + API 配置检查）
 ui/
 ├── splash_screen.py                    — 启动画面
 ├── api_config_dialog.py                — API 配置对话框
-└── ui_main.py                          — MainWindow（+智能检索 UI）
+├── smart_search_dialog.py              — 独立检索对话框（新增）
+└── ui_main.py                          — MainWindow（+智能检索入口）
 core/
 ├── config.py                           — 平台预设/字幕颜色
 ├── llm_config.py                       — LLM 供应商配置 + 持久化
@@ -55,9 +108,12 @@ core/
 ├── video_processor.py                  — 视频处理 + 爆点 + 渲染合并
 ├── subtitle_renderer.py                — 字幕+Overlay+章节
 ├── voice_cloner.py                     — 音色克隆
-├── smart_search.py                     — 检索纯逻辑（规划中，新增）
-└── search_thread.py                    — 检索后台线程（规划中，新增）
-tests/                                  — 65 个测试（+test_smart_search）
+├── search_types.py                     — 检索共享 dataclass（新增）
+├── smart_search.py                     — 检索纯逻辑（新增）
+├── trend_sources.py                    — HN/V2EX 热点抓取（新增）
+├── trend_thread.py                     — 热点异步抓取线程（新增）
+└── search_thread.py                    — 检索后台线程（新增）
+tests/                                  — 115 个测试（65 基线 + 50 新增）
 AI视频配音Pro.spec / build.sh           — 打包
 ```
 
@@ -66,7 +122,7 @@ AI视频配音Pro.spec / build.sh           — 打包
 ## 测试
 
 ```bash
-python3 -m pytest tests/ -v    # 65 tests（+智能检索测试）
+python3 -m pytest tests/ -v    # 114 passed + 1 skipped（115 tests）
 ```
 
 ## 打包
@@ -85,4 +141,4 @@ bash build.sh mac     # → dist/AI视频配音Pro.app (~1.1GB)
 | v4.3.2 | 06-26 | AI 管线复用 + H.265 tag 修复 + 配置保存修复 |
 | v4.3.3 | 06-29 | 启动画面（Splash Screen）— 纯代码绘制，零资源依赖 |
 | v4.3.4 | 07-16 | LLM API 供应商配置化 + 平台「自定义」+ UI 修复 |
-| **v4.4.0** | **09-03** | **智能视频搜索（规划中）— 自然语言检索 + 片段导出** |
+| **v4.4.0** | **11-02** | **智能视频检索 — 热点/批量/缓存/独立窗口（已实现）** |
