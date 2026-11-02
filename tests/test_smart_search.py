@@ -1,5 +1,6 @@
 """智能检索核心逻辑单测。"""
 
+import json
 import os
 import sys
 from types import SimpleNamespace
@@ -7,11 +8,13 @@ from types import SimpleNamespace
 import pytest
 
 import core.smart_search as smart_search
-from core.search_types import Hit, MatchContext, SearchIndex, TrendAngle
+from core.search_types import Clip, Hit, MatchContext, SearchIndex, TrendAngle
 from core.smart_search import (
-    LLMUnavailableError, extract_audio, keyword_match, llm_match_sentences,
-    load_cached_transcript, merge_hits, prefilter, probe_duration,
-    save_cached_transcript, tokenize, transcribe_audio,
+    LLMUnavailableError, build_clip_filename, build_export_cmd, export_clip,
+    export_report, extract_audio, is_already_exported, keyword_match,
+    llm_match_sentences, load_cached_transcript, load_export_ledger,
+    mark_exported, merge_hits, prefilter, probe_duration,
+    save_cached_transcript, save_export_ledger, tokenize, transcribe_audio,
     transcript_cache_key, transcript_cache_path,
 )
 
@@ -264,3 +267,59 @@ def test_llm_match_passes_timeout():
     client = _FakeClient(['[{"i":0,"relevant":true,"confidence":0.9,"reason":"ok"}]'])
     llm_match_sentences(MatchContext(query="q", angles=[]), ["s"], [0], client, "m")
     assert client.chat.completions.calls[0]["timeout"] == 30
+
+
+def _clip(start=10.0, end=20.0, filekey8="abcd1234", score=0.8):
+    return Clip(
+        source_file="/videos/a/demo.mp4", filekey8=filekey8,
+        start=start, end=end, matched_sentences=["价格"],
+        score=score, reason="提到价格", angles=["成本"],
+    )
+
+
+def test_build_clip_filename_includes_filekey():
+    name = build_clip_filename("/videos/a/demo.mp4", "abcd1234", 3, 10.0, 20.5)
+    assert name == "demo_abcd1234_clip03_10.0-20.5.mp4"
+
+
+def test_build_export_cmd_h264_software():
+    cmd = build_export_cmd("in.mp4", "out.mp4", 10.0, 20.0, "H.264 (MP4)", 4, vt_available=False)
+    assert cmd[:3] == ["ffmpeg", "-y", "-ss"]
+    assert cmd[cmd.index("-c:v") + 1] == "libx264"
+    assert cmd[cmd.index("-b:v") + 1] == "4M"
+    assert "-map" in cmd and "0:a:0?" in cmd
+    assert "-tag:v" not in cmd
+
+
+def test_build_export_cmd_h265_videotoolbox():
+    cmd = build_export_cmd("in.mp4", "out.mp4", 0.0, 5.0, "H.265 (HEVC)", 4, vt_available=True)
+    assert cmd[cmd.index("-c:v") + 1] == "hevc_videotoolbox"
+    assert cmd[cmd.index("-tag:v") + 1] == "hvc1"
+    assert "+faststart" in cmd
+
+
+def test_export_clip_rejects_missing_output(monkeypatch, tmp_path):
+    monkeypatch.setattr(smart_search.subprocess, "run", lambda *a, **k: None)
+    with pytest.raises(RuntimeError):
+        export_clip(_clip(), "in.mp4", str(tmp_path), "H.264 (MP4)", 4)
+
+
+def test_export_report_writes_json(tmp_path):
+    path = export_report([_clip()], str(tmp_path), meta={"query": "价格"})
+    data = json.loads(open(path, encoding="utf-8").read())
+    assert data["meta"]["query"] == "价格"
+    assert data["results"][0]["start"] == 10.0
+
+
+def test_export_ledger_roundtrip(tmp_path, monkeypatch):
+    monkeypatch.setattr(smart_search, "CACHE_ROOT", str(tmp_path / "cache"))
+    clip = _clip()
+    out = tmp_path / "clip.mp4"
+    out.write_bytes(b"x")
+    clip.clip_path = str(out)
+    ledger = load_export_ledger()
+    assert not is_already_exported(clip, ledger)
+    mark_exported(clip, str(out), ledger)
+    save_export_ledger(ledger)
+    ledger2 = load_export_ledger()
+    assert is_already_exported(clip, ledger2)

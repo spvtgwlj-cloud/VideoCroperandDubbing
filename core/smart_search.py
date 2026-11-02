@@ -9,6 +9,7 @@ import json
 import os
 import re
 import subprocess
+from dataclasses import asdict
 from typing import Any, Callable
 
 from .search_types import Clip, Hit, MatchContext, SearchIndex
@@ -498,3 +499,140 @@ def llm_match_sentences(
                 hits.append(hit)
 
     return hits
+
+
+_VT_AVAILABLE: bool | None = None
+
+
+def detect_videotoolbox() -> bool:
+    """探测 ffmpeg 是否支持 VideoToolbox 编码器（类级缓存）。"""
+    global _VT_AVAILABLE
+    if _VT_AVAILABLE is not None:
+        return _VT_AVAILABLE
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-encoders"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        _VT_AVAILABLE = "videotoolbox" in getattr(result, "stdout", "")
+    except Exception:
+        _VT_AVAILABLE = False
+    return _VT_AVAILABLE
+
+
+def build_clip_filename(source_path: str, filekey8: str, idx: int,
+                        start: float, end: float) -> str:
+    """生成带文件哈希与序号的片段文件名，避免递归扫描时覆盖。"""
+    stem = os.path.splitext(os.path.basename(source_path))[0]
+    return f"{stem}_{filekey8}_clip{idx:02d}_{start:.1f}-{end:.1f}.mp4"
+
+
+def build_export_cmd(source: str, out_path: str, start: float, end: float,
+                     codec: str, bitrate_mbps: int,
+                     vt_available: bool | None = None) -> list[str]:
+    """构造单段重编码导出命令（纯函数，便于单测）。"""
+    is_h265 = "H.265" in codec
+    if vt_available is None:
+        vt_available = detect_videotoolbox()
+    if vt_available:
+        vcodec = "hevc_videotoolbox" if is_h265 else "h264_videotoolbox"
+    else:
+        vcodec = "libx265" if is_h265 else "libx264"
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-ss", f"{start:.3f}",
+        "-t", f"{end - start:.3f}",
+        "-i", source,
+        "-c:v", vcodec,
+        "-b:v", f"{bitrate_mbps}M",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-b:a", "256k",
+        "-map", "0:v:0",
+        "-map", "0:a:0?",
+    ]
+    if is_h265:
+        cmd.extend(["-tag:v", "hvc1", "-movflags", "+faststart"])
+    cmd.append(out_path)
+    return cmd
+
+
+def export_clip(clip: Clip, source_path: str, out_dir: str,
+                codec: str, bitrate_mbps: int, timeout: int = 300,
+                idx: int = 0) -> str:
+    """导出单个片段并校验输出文件。"""
+    os.makedirs(out_dir, exist_ok=True)
+    filename = build_clip_filename(
+        source_path, clip.filekey8, idx, clip.start, clip.end,
+    )
+    out_path = os.path.join(out_dir, filename)
+    cmd = build_export_cmd(
+        source_path, out_path, clip.start, clip.end, codec, bitrate_mbps,
+    )
+    result = subprocess.run(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=timeout,
+    )
+    returncode = getattr(result, "returncode", 0)
+    if (returncode != 0 or not os.path.exists(out_path)
+            or os.path.getsize(out_path) <= 0):
+        stderr = getattr(result, "stderr", "")
+        raise RuntimeError(stderr or "ffmpeg 导出片段失败")
+    return out_path
+
+
+def export_report(results: list[Clip], out_dir: str,
+                  meta: dict | None = None) -> str:
+    """把检索结果写成 search_results.json。"""
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, "search_results.json")
+    payload = {
+        "meta": meta or {},
+        "results": [asdict(clip) for clip in results],
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    return path
+
+
+def export_ledger_key(clip: Clip) -> str:
+    """跨次去重台账 key。"""
+    return f"{clip.filekey8}:{clip.start:.1f}-{clip.end:.1f}"
+
+
+def load_export_ledger() -> dict:
+    """读取导出台账；不存在或损坏返回空字典。"""
+    path = os.path.join(CACHE_ROOT, "exported.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_export_ledger(ledger: dict) -> None:
+    """持久化导出台账。"""
+    path = os.path.join(CACHE_ROOT, "exported.json")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(ledger, f, ensure_ascii=False, indent=2)
+
+
+def is_already_exported(clip: Clip, ledger: dict) -> bool:
+    """台账中有记录且文件仍存在时视为已导出。"""
+    entry = ledger.get(export_ledger_key(clip))
+    if not isinstance(entry, dict):
+        return False
+    path = entry.get("path", "")
+    return bool(path) and os.path.exists(path)
+
+
+def mark_exported(clip: Clip, path: str, ledger: dict) -> None:
+    """在台账中标记片段已导出。"""
+    ledger[export_ledger_key(clip)] = {"path": path, "score": clip.score}
