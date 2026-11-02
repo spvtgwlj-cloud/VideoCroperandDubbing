@@ -155,3 +155,22 @@ bash build.sh mac     # → dist/AI视频配音Pro.app (~1.1GB)
 | v4.3.3 | 06-29 | 启动画面（Splash Screen）— 纯代码绘制，零资源依赖 |
 | v4.3.4 | 07-16 | LLM API 供应商配置化 + 平台「自定义」+ UI 修复 |
 | **v4.4.0** | **11-02** | **智能视频检索 — 热点/批量/缓存/独立窗口（已实现）** |
+| **v4.5.0** | **11-02** | **纯本地视觉内容检索（设计阶段）** |
+
+---
+
+## v4.5.0 规划（纯本地视觉内容检索）
+
+> 状态：**设计阶段，代码未实现**（2026-11-02）
+> 设计文档：`智能视频内容检索v4.5.0设计方案20261102.md`
+
+- 目标：在 v4.4.0 音频语义检索基础上，新增视频画面理解：
+  - 描述性查询（如「穿黄色鞋子的机器人」）
+  - 胸牌号码跨视频查询（如「找到胸牌号码为 7 的机器人」）
+- **纯本地执行**：不调用云端 VLM、不上传视频/帧、不做模型微调；视觉检索运行时零网络。
+- 首选本地后端：**ONNX Runtime**（Chinese-CLIP、YOLO-World/OWLv2、RapidOCR）；不可用则独立 Python 3.12 sidecar；可选本地 Qwen2.5-VL-3B（MLX，M1/16GB 上限）。
+- 环境与后端：Python 3.14.6 / torch 2.11.0 / onnxruntime 1.26.0；未安装 transformers/torchvision；视觉先源码 beta，是否进 `.app` 在 Phase 4 决定。
+- 架构：新增 `core/visual_types.py` / `frame_sampler.py` / `visual_index.py` / `visual_models.py` / `visual_search.py` / `visual_thread.py` 与视觉检索窗口；复用 v4.4.0 片段导出、去重、进度模式；音频引擎不改。
+- 下一步：Phase 0 可行性验证（ONNX/sidecar 后端可用性、胸牌 OCR 可读性、黄鞋召回、M1/16GB 测速）→ 设计评审确认 → 实施计划。
+- 仍需确认：样例视频与准确率目标；同帧多机器人/胸牌可见性；是否必须进打包 `.app`。
+- 主要风险：胸牌字小/模糊、CLIP 细粒度属性噪声、Python 3.14 模型栈兼容性、本地 VLM 内存、PyInstaller 冻结。
