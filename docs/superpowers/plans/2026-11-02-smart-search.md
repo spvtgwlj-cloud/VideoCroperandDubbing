@@ -1329,7 +1329,7 @@ git commit -m "feat(smart-search): 主界面接线与功能开关" -m "Co-Author
 ### Task 13: 全量回归、端到端验证与文档
 
 **Files:**
-- Modify: `HANDOFF_v4.4.0_20260903.md`
+- Modify: `HANDOFF_v4.4.0_20261102.md`
 - Modify: `AI视频配音Pro-使用手册.md`（新增“智能检索”章节）
 - Possibly modify: `智能视频检索v4.4.0设计方案20261102.md`（记录实施结果）
 
@@ -1367,12 +1367,12 @@ Expected: 输出 `hidden ok`。
 
 - [ ] **Step 4: 更新文档**
 
-`HANDOFF_v4.4.0_20260903.md` 增加“实施状态”段落：列出新增文件、测试数量、已知限制（Whisper 停止需等当前文件、HN 网络依赖）。`AI视频配音Pro-使用手册.md` 增加「智能检索」操作步骤和输出目录说明。
+`HANDOFF_v4.4.0_20261102.md` 增加“实施状态”段落：列出新增文件、测试数量、已知限制（Whisper 停止需等当前文件、HN 网络依赖）。`AI视频配音Pro-使用手册.md` 增加「智能检索」操作步骤和输出目录说明。
 
 - [ ] **Step 5: 提交**
 
 ```bash
-git add HANDOFF_v4.4.0_20260903.md AI视频配音Pro-使用手册.md
+git add HANDOFF_v4.4.0_20261102.md AI视频配音Pro-使用手册.md
 git commit -m "docs(v4.4.0): 更新智能检索实施状态与使用说明" -m "Co-Authored-By: Claude Code <noreply@anthropic.com>"
 ```
 
