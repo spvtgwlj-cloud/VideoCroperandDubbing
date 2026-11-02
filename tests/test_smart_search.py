@@ -294,12 +294,19 @@ def test_build_clip_filename_includes_filekey():
     assert name == "demo_abcd1234_clip03_10.0-20.5.mp4"
 
 
+def test_build_export_cmd_uses_cfr():
+    cmd = build_export_cmd("in.mp4", "out.mp4", 0.0, 5.0, "H.264 (MP4)", 4, vt_available=False)
+    assert cmd[cmd.index("-fps_mode") + 1] == "cfr"
+
+
 def test_build_export_cmd_h264_software():
     cmd = build_export_cmd("in.mp4", "out.mp4", 10.0, 20.0, "H.264 (MP4)", 4, vt_available=False)
     assert cmd[:3] == ["ffmpeg", "-y", "-ss"]
     assert cmd[cmd.index("-c:v") + 1] == "libx264"
     assert cmd[cmd.index("-b:v") + 1] == "4M"
     assert "-map" in cmd and "0:a:0?" in cmd
+    assert "-dn" in cmd and "-sn" in cmd
+    assert cmd[cmd.index("-write_tmcd") + 1] == "0"
     assert "-tag:v" not in cmd
 
 

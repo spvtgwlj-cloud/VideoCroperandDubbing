@@ -651,10 +651,13 @@ def build_export_cmd(source: str, out_path: str, start: float, end: float,
         "-c:v", vcodec,
         "-b:v", f"{bitrate_mbps}M",
         "-pix_fmt", "yuv420p",
+        "-fps_mode", "cfr",
         "-c:a", "aac",
         "-b:a", "256k",
         "-map", "0:v:0",
         "-map", "0:a:0?",
+        "-dn", "-sn",
+        "-write_tmcd", "0",
     ]
     if is_h265:
         cmd.extend(["-tag:v", "hvc1", "-movflags", "+faststart"])

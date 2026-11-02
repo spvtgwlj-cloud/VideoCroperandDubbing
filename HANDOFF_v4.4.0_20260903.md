@@ -64,10 +64,10 @@
 ### 测试
 
 ```bash
-python3 -m pytest tests/ -q    # 129 passed, 1 skipped
+python3 -m pytest tests/ -q    # 130 passed, 1 skipped
 ```
 
-新增 65 个测试，覆盖关键词匹配/预筛、片段合并、转写缓存、LLM 批量打分与熔断、导出/报告/去重台账、热点抓取/归纳、编排线程、功能开关、UI 线程保护、进度反馈与空结果兜底。
+新增 66 个测试，覆盖关键词匹配/预筛、片段合并、转写缓存、LLM 批量打分与熔断、导出/报告/去重台账、热点抓取/归纳、编排线程、功能开关、UI 线程保护、进度反馈、空结果兜底与导出兼容性。
 
 ### 端到端验证
 
@@ -80,6 +80,7 @@ python3 -m pytest tests/ -q    # 129 passed, 1 skipped
 - Whisper `transcribe` 无法中途打断；若正在转写，停止需等当前视频处理完。ffmpeg 提取/导出支持取消。
 - HN 网络不稳定时热榜抓取可能失败；不影响仅用提示词检索。
 - 检索窗口当前固定 H.264 / 4 Mbps，未暴露编码/码率控件。
+- 搜索片段是纯截取，不做音量归一化；源片段静音/音量低时，输出同样静音/低。
 - GUI 的完整手动点击流程建议发布前再走一遍验收。
 
 ### 用户反馈修复（2026-11-02）
@@ -91,6 +92,7 @@ python3 -m pytest tests/ -q    # 129 passed, 1 skipped
 - 缓存命中时日志明确提示「跳过音频提取/Whisper 转写」，进度直接从 50% 开始打分。
 - LLM 网络/超时失败不再逐句重试；连续两批失败即降级关键词，避免长时间停在 50%。
 - 强匹配为 0 时自动放宽关键词兜底（`min_score=0.0`）；报告记录 `stats` 与 `relaxed_fallback_used`，日志提示需人工复核。
+- 导出强制 CFR（恒定帧率），音频统一转 AAC 256k，并移除源数据/时间码轨，改善 VFR 源播放卡顿与播放器兼容性。
 
 ### 分支与回退
 
@@ -123,7 +125,7 @@ core/
 ├── trend_sources.py                    — HN/V2EX 热点抓取（新增）
 ├── trend_thread.py                     — 热点异步抓取线程（新增）
 └── search_thread.py                    — 检索后台线程（新增）
-tests/                                  — 130 个测试（65 基线 + 65 新增）
+tests/                                  — 131 个测试（65 基线 + 66 新增）
 AI视频配音Pro.spec / build.sh           — 打包
 ```
 
@@ -132,7 +134,7 @@ AI视频配音Pro.spec / build.sh           — 打包
 ## 测试
 
 ```bash
-python3 -m pytest tests/ -v    # 129 passed + 1 skipped（130 tests）
+python3 -m pytest tests/ -v    # 130 passed + 1 skipped（131 tests）
 ```
 
 ## 打包
