@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-短视频 AI 配音 + 翻译 + 竖屏裁切一体化工具。v4.4.0 为**规划阶段**：新增「智能视频搜索」能力——通过自然语言在选定视频中定位并输出匹配片段。
+短视频 AI 配音 + 翻译 + 竖屏裁切一体化工具。v4.4.0 已实现「智能视频搜索」能力——通过自然语言在选定视频中定位并输出匹配片段；2026-11-03 增加热榜关联优化、空结果诊断与「建议脚本」生成。
 
 **目标用户**：短视频运营工程师 / 跨境营销 / 自媒体创作者
 
@@ -64,10 +64,12 @@
 ### 测试
 
 ```bash
-python3 -m pytest tests/ -q    # 130 passed, 1 skipped
+python3 -m pytest tests/ -q    # 170 passed, 1 skipped（截至 2026-11-03）
 ```
 
 新增 66 个测试，覆盖关键词匹配/预筛、片段合并、转写缓存、LLM 批量打分与熔断、导出/报告/去重台账、热点抓取/归纳、编排线程、功能开关、UI 线程保护、进度反馈、空结果兜底与导出兼容性。
+
+2026-11-03 再新增 40 个测试，覆盖多角度独立计分、热度微调、LLM `angle_index`、空结果分型、弱相关开关与建议脚本生成。
 
 ### 端到端验证
 
@@ -95,6 +97,50 @@ python3 -m pytest tests/ -q    # 130 passed, 1 skipped
 - 强匹配为 0 时自动放宽关键词兜底（`min_score=0.0`）；报告记录 `stats` 与 `relaxed_fallback_used`，日志提示需人工复核。
 - 按用户要求保留源信号：不强制 CFR、保留源帧率；音频 `-c:a copy`，不重编码、不做音量归一化；仅视频为精确切帧重编码；移除数据/时间码轨（仅元数据）。
 
+### 热点关联与建议脚本增强（2026-11-03）
+
+#### 1. 热榜关联优化
+
+- 本地关键词/预筛改为「query 与每个角度独立计分取最大值」，不再被角度数量稀释。
+- 角度归属阈值 `ANGLE_ATTRIBUTION_MIN = 0.15`；`TrendAngle` / `Hit` / `Clip` 增加归一化热度、原始热度与来源。
+- 热度按来源分别 min-max 归一化；最终分 = 内容分 + `HEAT_BONUS_MAX(0.05) × 热度`，只做同分微调。
+- LLM 逐句打分要求返回 `angle_index`，并新增「只有可独立成片的明确信息才算相关」的严格约束。
+- 结果列表显示契合度、关联角度与原始热度；悬停显示命中理由、命中句与最终排序分。
+
+#### 2. 空结果诊断与弱相关开关
+
+- `search_results.json` 新增 `stats.zero_reason`、`stats.relaxed_enabled` 与 `file_stats[]`。
+- `zero_reason` 区分：`llm_no_relevant` / `llm_unavailable` / `llm_parse_error` / `llm_partial_parse_error` / `no_segments` / `keyword_no_match` / `file_error`。
+- 参数区新增「无强匹配时输出弱相关片段（需人工复核）」，默认关闭；只有勾选后才执行 `min_score=0.0` 兜底。
+- LLM 正常但 0 命中时，UI 状态栏与报告明确提示「调用正常、判定无相关」，不再被泛化提示覆盖。
+
+#### 3. 建议脚本模块
+
+- 新增 `core/script_suggest.py`、`core/script_thread.py`、`ui/script_dialog.py`。
+- 入口：智能检索窗口「📝 建议脚本」按钮，针对当前选中的单个视频（批量时使用第一个并提示）。
+- 流程：复用转写缓存（无缓存则 Whisper turbo 转写）→ 使用已有热点角度或自动抓取 HN/V2EX 并归纳 → LLM 生成结构化脚本 → 解析句子编号为真实时间范围 → 保存 `suggested_script.json` / `suggested_script.md`。
+- 输出：标题、3 秒钩子、目标时长、分段口播、引用素材时间范围/画面说明、CTA、选题理由；无素材分段标记「需补拍」。
+- LLM 超时 120 秒、`max_tokens=1800`、关闭 SDK 自动重试；日志提示约需 1–2 分钟。
+- 打包：`AI视频配音Pro.spec` 增加 `core.script_suggest`、`core.script_thread`、`ui.script_dialog` 三个 hiddenimports。
+
+#### 4. UI 修复
+
+- 顶部设置区套 `QScrollArea`，参数区不再被压缩；窗口高度不足时滚动。
+- 热点复选框补齐深色可见样式；自动模式隐藏复选框，手动模式才可勾选。
+- 「深度模式」与「强制重新导出」合并到同一行；输出目录改为独立横排并设最小宽度。
+
+#### 5. 验证
+
+- `python3 -m pytest tests/ -q` → **170 passed, 1 skipped**。
+- 真实模型验证建议脚本：耗时 99.6s，生成 4 段，引用时间范围 `4.1-22.7s` / `59.1-79.9s` / `80.7-112.4s`；借势段无对应素材，正确标记「需补拍」。
+
+#### 6. 已知限制（本次新增）
+
+- 建议脚本当前模型生成约 100 秒，120 秒超时余量有限；网络慢时需重试。
+- 建议脚本仅支持单个视频；输出文件名固定，同一输出目录多次生成会覆盖。
+- 角度是「AI 归纳」还是「原始标题兜底」尚未在 UI/报告中标记。
+- 当前环境未安装 flake8/ruff，仅执行 `py_compile` 与 pytest。
+
 ### 分支与回退
 
 - 基线：`abff400` / 标签 `v4.3.4-baseline`
@@ -111,6 +157,7 @@ entry.py                                — 主入口（SplashScreen + API 配�
 ui/
 ├── splash_screen.py                    — 启动画面
 ├── api_config_dialog.py                — API 配置对话框
+├── script_dialog.py                    — 建议脚本展示对话框（新增）
 ├── smart_search_dialog.py              — 独立检索对话框（新增）
 └── ui_main.py                          — MainWindow（+智能检索入口）
 core/
@@ -125,8 +172,10 @@ core/
 ├── smart_search.py                     — 检索纯逻辑（新增）
 ├── trend_sources.py                    — HN/V2EX 热点抓取（新增）
 ├── trend_thread.py                     — 热点异步抓取线程（新增）
-└── search_thread.py                    — 检索后台线程（新增）
-tests/                                  — 131 个测试（65 基线 + 66 新增）
+├── search_thread.py                    — 检索后台线程（新增）
+├── script_suggest.py                   — 建议脚本 prompt/解析/渲染（新增）
+└── script_thread.py                    — 建议脚本编排线程（新增）
+tests/                                  — 171 个测试（65 基线 + 106 新增；170 passed + 1 skipped）
 AI视频配音Pro.spec / build.sh           — 打包
 ```
 
@@ -135,7 +184,7 @@ AI视频配音Pro.spec / build.sh           — 打包
 ## 测试
 
 ```bash
-python3 -m pytest tests/ -v    # 130 passed + 1 skipped（131 tests）
+python3 -m pytest tests/ -v    # 170 passed + 1 skipped（171 tests）
 ```
 
 ## 打包
@@ -154,7 +203,7 @@ bash build.sh mac     # → dist/AI视频配音Pro.app (~1.1GB)
 | v4.3.2 | 06-26 | AI 管线复用 + H.265 tag 修复 + 配置保存修复 |
 | v4.3.3 | 06-29 | 启动画面（Splash Screen）— 纯代码绘制，零资源依赖 |
 | v4.3.4 | 07-16 | LLM API 供应商配置化 + 平台「自定义」+ UI 修复 |
-| **v4.4.0** | **11-02** | **智能视频检索 — 热点/批量/缓存/独立窗口（已实现）** |
+| **v4.4.0** | **11-02 / 11-03** | **智能视频检索 — 热点/批量/缓存/独立窗口；11-03 增加热榜关联优化、空结果诊断与建议脚本** |
 | **v4.5.0** | **11-02** | **纯本地视觉内容检索（设计阶段）** |
 
 ---

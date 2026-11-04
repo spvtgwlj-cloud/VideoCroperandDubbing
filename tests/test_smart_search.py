@@ -75,6 +75,31 @@ def test_prefilter_limits_candidates_when_enough_hits():
     assert 0 < len(candidates) < len(idx.segments)
 
 
+def test_keyword_match_not_diluted_by_many_angles():
+    angles = [TrendAngle(title="价格", keywords=[], why="")] + [
+        TrendAngle(title=f"无关{i}", keywords=[], why="") for i in range(8)
+    ]
+    hits = keyword_match(
+        MatchContext(query="", angles=angles), _index(["这个价格很便宜"]),
+    )
+    assert len(hits) == 1
+    assert hits[0].score == pytest.approx(1.0)
+    assert hits[0].angles == ["价格"]
+
+
+def test_prefilter_not_diluted_by_many_angles():
+    angles = [TrendAngle(title="价格", keywords=[], why="")] + [
+        TrendAngle(title=title, keywords=[], why="")
+        for title in ["天气", "美食", "旅行", "体育", "音乐", "电影", "游戏", "科技"]
+    ]
+    texts = ["这个价格很便宜"] * 20 + ["completely unrelated content"] * 80
+    candidates = prefilter(
+        MatchContext(query="", angles=angles),
+        _index(texts, duration=300.0),
+    )
+    assert 0 < len(candidates) < 100
+
+
 def test_merge_hits_merges_nearby_and_splits_on_gap():
     segments = [
         {"start": 10.0, "end": 12.0, "text": "价格一"},
@@ -116,6 +141,43 @@ def test_merge_hits_top_k_and_duplicate_index():
     clips = merge_hits(hits, segments, duration=60.0, top_k=1)
     assert len(clips) == 1
     assert clips[0].score == pytest.approx(0.9)
+
+
+def test_keyword_match_carries_angle_heat():
+    angle = TrendAngle(
+        "价格", [], "", heat=0.8, heat_raw=100, heat_source="hn",
+    )
+    hits = keyword_match(
+        MatchContext(query="", angles=[angle]), _index(["这个价格很便宜"]),
+    )
+    assert hits[0].heat == pytest.approx(0.8)
+    assert hits[0].heat_raw == 100
+    assert hits[0].heat_source == "hn"
+
+
+def test_heat_bonus_breaks_content_ties():
+    segments = [
+        {"start": 0.0, "end": 5.0, "text": "冷"},
+        {"start": 20.0, "end": 25.0, "text": "热"},
+    ]
+    cold = Hit(0, 0.8)
+    hot = Hit(1, 0.8, heat=1.0, heat_raw=100, heat_source="hn")
+    clips = merge_hits([cold, hot], segments, duration=60.0, top_k=10)
+    assert clips[0].matched_sentences == ["热"]
+    assert clips[0].score == pytest.approx(0.85)
+    assert clips[0].content_score == pytest.approx(0.8)
+    assert clips[0].heat == pytest.approx(1.0)
+
+
+def test_heat_bonus_cannot_override_content_gap():
+    segments = [
+        {"start": 0.0, "end": 5.0, "text": "高内容"},
+        {"start": 20.0, "end": 25.0, "text": "高热"},
+    ]
+    higher = Hit(0, 0.9)
+    hotter = Hit(1, 0.8, heat=1.0, heat_raw=100, heat_source="hn")
+    clips = merge_hits([higher, hotter], segments, duration=60.0, top_k=10)
+    assert clips[0].matched_sentences == ["高内容"]
 
 
 def test_transcript_cache_key_changes_with_content_and_model(tmp_path):
@@ -229,6 +291,24 @@ def test_llm_match_parses_batch_json():
     assert len(hits) == 1
     assert hits[0].index == 0 and hits[0].score == pytest.approx(0.9)
     assert hits[0].angles == ["成本"]
+
+
+def test_llm_match_resolves_angle_index_to_heat():
+    angle = TrendAngle(
+        "成本", ["价格"], "", heat=0.75, heat_raw=120, heat_source="hn",
+    )
+    client = _FakeClient([
+        '[{"i":0,"relevant":true,"confidence":0.9,"reason":"提到价格",'
+        '"angle_index":0}]',
+    ])
+    hits = llm_match_sentences(
+        MatchContext(query="价格", angles=[angle]),
+        ["这个价格很便宜"], [0], client, "m",
+    )
+    assert hits[0].angles == ["成本"]
+    assert hits[0].heat == pytest.approx(0.75)
+    assert hits[0].heat_raw == 120
+    assert hits[0].heat_source == "hn"
 
 
 def test_llm_match_strips_code_fence():
@@ -394,6 +474,33 @@ def test_llm_match_sentences_stops_between_batches():
     )
     assert len(hits) == 1
     assert len(client.chat.completions.calls) == 1
+
+
+def test_llm_match_sentences_records_parse_errors():
+    client = _FakeClient([
+        "not json",
+        '{"relevant":true,"confidence":0.7,"reason":"单句重试"}',
+    ])
+    diagnostics = {}
+    hits = llm_match_sentences(
+        MatchContext(query="q", angles=[]), ["s"], [2], client, "m",
+        diagnostics=diagnostics,
+    )
+    assert len(hits) == 1
+    assert diagnostics["parse_errors"] == 1
+    assert diagnostics["transport_errors"] == 0
+    assert diagnostics["batches_ok"] == 0
+
+
+def test_llm_match_sentences_records_transport_errors():
+    client = _FakeClient([RuntimeError("timeout"), RuntimeError("timeout")])
+    diagnostics = {}
+    with pytest.raises(LLMUnavailableError):
+        llm_match_sentences(
+            MatchContext(query="q", angles=[]), ["a", "b"], [0, 1],
+            client, "m", batch_size=1, diagnostics=diagnostics,
+        )
+    assert diagnostics["transport_errors"] == 2
 
 
 def test_keyword_match_supports_relaxed_min_score():

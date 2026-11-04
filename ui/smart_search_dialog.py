@@ -6,17 +6,21 @@ import subprocess
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
-    QAbstractItemView, QButtonGroup, QCheckBox, QDialog, QDoubleSpinBox,
-    QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
-    QListWidget, QListWidgetItem, QMessageBox, QProgressBar, QPushButton,
-    QRadioButton, QSpinBox, QTextEdit, QVBoxLayout,
+    QAbstractItemView, QAbstractScrollArea, QButtonGroup, QCheckBox, QDialog,
+    QDoubleSpinBox, QFileDialog, QFormLayout, QFrame, QGroupBox, QHBoxLayout,
+    QLabel, QLineEdit, QListWidget, QListWidgetItem, QMessageBox,
+    QProgressBar, QPushButton, QRadioButton, QScrollArea, QSpinBox,
+    QTextEdit, QVBoxLayout, QWidget,
 )
 
+from core.script_suggest import render_script_markdown
+from core.script_thread import ScriptSuggestionThread
 from core.search_thread import SmartSearchThread
 from core.search_types import TrendAngle
 from core.smart_search import export_report
 from core.trend_sources import extract_keywords
 from core.trend_thread import TrendFetchThread
+from ui.script_dialog import ScriptDialog
 
 DEFAULT_CODEC = "H.264 (MP4)"
 DEFAULT_BITRATE_MBPS = 4
@@ -30,6 +34,7 @@ class SmartSearchDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("🔍 智能视频检索")
         self.resize(1100, 800)
+        self.setMinimumSize(900, 600)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
 
         self._auto_angles: list[TrendAngle] = []
@@ -37,6 +42,7 @@ class SmartSearchDialog(QDialog):
         self._close_when_finished = False
         self._thread = None
         self._trend_thread = None
+        self._script_thread = None
 
         self._init_ui()
         self._apply_style()
@@ -51,9 +57,24 @@ class SmartSearchDialog(QDialog):
         main_layout.setSpacing(10)
         main_layout.setContentsMargins(18, 14, 24, 14)
 
-        main_layout.addWidget(self._build_scope_group())
-        main_layout.addWidget(self._build_intent_group())
-        main_layout.addWidget(self._build_params_group())
+        settings = QWidget()
+        settings_layout = QVBoxLayout(settings)
+        settings_layout.setContentsMargins(0, 0, 0, 0)
+        settings_layout.setSpacing(10)
+        settings_layout.addWidget(self._build_scope_group())
+        settings_layout.addWidget(self._build_intent_group())
+        settings_layout.addWidget(self._build_params_group())
+
+        self.settings_scroll = QScrollArea()
+        self.settings_scroll.setWidgetResizable(True)
+        self.settings_scroll.setFrameShape(QFrame.NoFrame)
+        self.settings_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.settings_scroll.setSizeAdjustPolicy(
+            QAbstractScrollArea.AdjustToContents,
+        )
+        self.settings_scroll.setWidget(settings)
+        main_layout.addWidget(self.settings_scroll, 2)
+
         main_layout.addLayout(self._build_action_row())
         self.status_label = QLabel("准备就绪")
         self.status_label.setWordWrap(True)
@@ -150,11 +171,13 @@ class SmartSearchDialog(QDialog):
         self.angle_label = QLabel("自动归纳: 尚未抓取")
         self.angle_label.setWordWrap(True)
         layout.addWidget(self.angle_label)
+        self.radio_manual.toggled.connect(self._on_mode_changed)
         return group
 
     def _build_params_group(self):
         group = QGroupBox("③ 参数")
-        form = QFormLayout(group)
+        layout = QVBoxLayout(group)
+        form = QFormLayout()
         form.setSpacing(6)
 
         self.spin_min_dur = QSpinBox()
@@ -177,22 +200,32 @@ class SmartSearchDialog(QDialog):
         self.spin_top_k.setSuffix(" 条/视频")
         self.chk_deep = QCheckBox("深度模式（全部句子送 LLM，更慢更贵）")
         self.chk_force_export = QCheckBox("强制重新导出（忽略已导出台账）")
+        self.chk_relaxed = QCheckBox("无强匹配时输出弱相关片段（需人工复核）")
 
         form.addRow("最短片段:", self.spin_min_dur)
         form.addRow("最长片段:", self.spin_max_dur)
         form.addRow("合并间隔:", self.spin_merge_gap)
         form.addRow("每视频最多:", self.spin_top_k)
-        form.addRow("", self.chk_deep)
-        form.addRow("", self.chk_force_export)
+
+        checks_row = QHBoxLayout()
+        checks_row.setSpacing(24)
+        checks_row.addWidget(self.chk_deep)
+        checks_row.addWidget(self.chk_force_export)
+        checks_row.addStretch()
+        form.addRow("", checks_row)
+        form.addRow("", self.chk_relaxed)
+        layout.addLayout(form)
 
         out_row = QHBoxLayout()
+        out_row.addWidget(QLabel("输出目录:"))
         self.input_out_dir = QLineEdit()
         self.input_out_dir.setPlaceholderText("选择片段输出目录...")
+        self.input_out_dir.setMinimumWidth(360)
         self.btn_browse_out = QPushButton("浏览")
         self.btn_browse_out.clicked.connect(self._browse_output)
         out_row.addWidget(self.input_out_dir, 1)
         out_row.addWidget(self.btn_browse_out)
-        form.addRow("输出目录:", out_row)
+        layout.addLayout(out_row)
         return group
 
     def _build_action_row(self):
@@ -204,10 +237,14 @@ class SmartSearchDialog(QDialog):
         self.btn_stop.setFixedHeight(40)
         self.btn_stop.setEnabled(False)
         self.btn_stop.clicked.connect(self.stop_search)
+        self.btn_script = QPushButton("📝 建议脚本")
+        self.btn_script.setFixedHeight(40)
+        self.btn_script.clicked.connect(self.suggest_script)
         self.progress = QProgressBar()
         self.progress.setValue(0)
         row.addWidget(self.btn_start, 1)
         row.addWidget(self.btn_stop, 1)
+        row.addWidget(self.btn_script, 1)
         row.addWidget(self.progress, 3)
         return row
 
@@ -334,9 +371,9 @@ class SmartSearchDialog(QDialog):
         for hotspot in items:
             text = f"[{hotspot.source.upper()}] {hotspot.title}  🔥{hotspot.score}"
             item = QListWidgetItem(text)
-            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
             item.setCheckState(Qt.Unchecked)
             item.setData(Qt.UserRole, hotspot)
+            self._set_item_checkable(item, self.radio_manual.isChecked())
             self.trend_list.addItem(item)
         self._on_log(f"✅ 已抓取 {len(items)} 条热点")
 
@@ -370,8 +407,27 @@ class SmartSearchDialog(QDialog):
                 keywords=extract_keywords(hotspot.title),
                 why="手动选择",
                 source_ids=[f"{hotspot.source}:{hotspot.url}"],
+                heat=hotspot.heat,
+                heat_raw=hotspot.score,
+                heat_source=hotspot.source,
             ))
         return angles
+
+    def _set_item_checkable(self, item, enabled):
+        """自动模式下隐藏热点复选框，手动模式才允许勾选。"""
+        flags = item.flags()
+        if enabled:
+            flags |= Qt.ItemIsUserCheckable
+        else:
+            flags &= ~Qt.ItemIsUserCheckable
+            item.setCheckState(Qt.Unchecked)
+        item.setFlags(flags)
+
+    def _on_mode_changed(self):
+        manual = self.radio_manual.isChecked()
+        for i in range(self.trend_list.count()):
+            self._set_item_checkable(self.trend_list.item(i), manual)
+        self.angle_label.setVisible(not manual)
 
     # ----------------------------------------------------------------
     # 检索
@@ -380,6 +436,8 @@ class SmartSearchDialog(QDialog):
     def start_search(self):
         if self._thread is not None and self._thread.isRunning():
             return self._on_log("⚠️ 检索仍在进行，请先停止")
+        if self._script_thread is not None and self._script_thread.isRunning():
+            return self._on_log("⚠️ 建议脚本仍在生成，请稍候")
 
         scope = self._collect_scope()
         if not scope:
@@ -404,6 +462,7 @@ class SmartSearchDialog(QDialog):
         self.btn_start.setEnabled(False)
         self.btn_fetch.setEnabled(False)
         self.btn_stop.setEnabled(True)
+        self.btn_script.setEnabled(False)
 
         self._thread = SmartSearchThread(
             scope, query, angles,
@@ -414,6 +473,7 @@ class SmartSearchDialog(QDialog):
             top_k=self.spin_top_k.value(),
             deep_mode=self.chk_deep.isChecked(),
             force_export=self.chk_force_export.isChecked(),
+            allow_relaxed_fallback=self.chk_relaxed.isChecked(),
             parent=self,
         )
         self._thread.log_msg.connect(self._on_log)
@@ -432,6 +492,67 @@ class SmartSearchDialog(QDialog):
             self._thread.stop()
             self._on_log("⏹️ 正在停止（当前视频处理完后退出）...")
 
+    def suggest_script(self):
+        """针对当前选中的单个视频生成建议脚本。"""
+        if self._script_thread is not None and self._script_thread.isRunning():
+            return self._on_log("⚠️ 建议脚本仍在生成，请稍候")
+        if self._thread is not None and self._thread.isRunning():
+            return self._on_log("⚠️ 检索仍在进行，请先停止")
+        if (self._trend_thread is not None
+                and self._trend_thread.isRunning()):
+            return self._on_log("⚠️ 热点抓取仍在进行，请稍候")
+
+        scope = self._collect_scope()
+        if not scope:
+            return self._on_log("⚠️ 请选择有效的视频文件或文件夹")
+        video = scope[0]
+        if len(scope) > 1:
+            self._on_log(
+                "ℹ️ 建议脚本针对单个视频，已使用第一个: "
+                f"{os.path.basename(video)}"
+            )
+
+        out_dir = self.input_out_dir.text().strip()
+        if not out_dir:
+            return self._on_log("⚠️ 请选择输出目录")
+        try:
+            os.makedirs(out_dir, exist_ok=True)
+        except OSError as exc:
+            return self._on_log(f"⚠️ 输出目录不可写: {exc}")
+
+        self.progress.setValue(0)
+        self.btn_start.setEnabled(False)
+        self.btn_fetch.setEnabled(False)
+        self.btn_script.setEnabled(False)
+        self._script_thread = ScriptSuggestionThread(
+            video, self._collect_angles(), self.input_query.text().strip(),
+            out_dir, parent=self,
+        )
+        self._script_thread.log_msg.connect(self._on_log)
+        self._script_thread.progress_changed.connect(self._on_progress)
+        self._script_thread.script_ready.connect(self._on_script_ready)
+        self._script_thread.error.connect(self._on_script_error)
+        self._script_thread.finished.connect(self._on_script_finished)
+        self._on_log(f"▶️ 正在生成建议脚本: {os.path.basename(video)}")
+        self._script_thread.start()
+
+    def _on_script_ready(self, script, json_path, md_path):
+        markdown = render_script_markdown(script)
+        self._on_log(f"✅ 建议脚本已生成: {md_path}")
+        dialog = ScriptDialog(script, markdown, json_path, md_path, self)
+        dialog.exec_()
+
+    def _on_script_error(self, msg):
+        self._on_log(f"❌ 建议脚本生成失败: {msg}")
+
+    def _on_script_finished(self):
+        self.btn_start.setEnabled(True)
+        self.btn_fetch.setEnabled(True)
+        self.btn_script.setEnabled(True)
+        if self.progress.value() < 100:
+            self.progress.setValue(0)
+        self._maybe_finish_close()
+
     def _on_log(self, msg):
         self.log_view.append(msg)
         bar = self.log_view.verticalScrollBar()
@@ -447,23 +568,45 @@ class SmartSearchDialog(QDialog):
     def _on_progress(self, value):
         self.progress.setValue(int(value))
 
+    def _format_clip_line(self, clip) -> str:
+        """结果列表单行：文件 | 时间 | 契合度 | 关联角度/热度 | 摘要。"""
+        prefix = "[已导出] " if clip.already_exported else ""
+        snippet = " ".join(clip.matched_sentences)[:60]
+        angle_text = "、".join(clip.angles[:2]) if clip.angles else "无关联热点"
+        heat_text = ""
+        if clip.heat_raw:
+            heat_text = f"（{clip.heat_source.upper()} {clip.heat_raw}）"
+        return (
+            f"{prefix}{os.path.basename(clip.source_file)} | "
+            f"{clip.start:.1f}s-{clip.end:.1f}s | "
+            f"契合 {clip.content_score:.2f} | {angle_text}{heat_text} | {snippet}"
+        )
+
+    def _format_clip_tooltip(self, clip) -> str:
+        """悬停展示完整命中理由与命中句。"""
+        return (
+            f"内容契合: {clip.content_score:.2f}\n"
+            f"最终排序分: {clip.score:.2f}\n"
+            f"关联角度: {'、'.join(clip.angles) or '无'}\n"
+            f"命中理由: {clip.reason}\n"
+            f"命中句: {' / '.join(clip.matched_sentences)}"
+        )
+
     def _on_results(self, clips):
         self._clips = list(clips)
         self.results_list.clear()
         for clip in clips:
-            snippet = " ".join(clip.matched_sentences)[:60]
-            prefix = "[已导出] " if clip.already_exported else ""
-            text = (
-                f"{prefix}{os.path.basename(clip.source_file)} | "
-                f"{clip.start:.1f}s-{clip.end:.1f}s | {snippet}"
-            )
-            item = QListWidgetItem(text)
+            item = QListWidgetItem(self._format_clip_line(clip))
             item.setData(Qt.UserRole, clip.clip_path)
+            item.setToolTip(self._format_clip_tooltip(clip))
             self.results_list.addItem(item)
         if clips:
             self._on_log(f"✅ 检索完成，共 {len(clips)} 个片段")
         else:
-            self._on_log("ℹ️ 检索完成，未找到匹配片段")
+            # 保留线程给出的具体空结果原因，不用泛化提示覆盖状态栏。
+            self.log_view.append("ℹ️ 检索完成：未找到匹配片段（原因见上方日志）")
+            bar = self.log_view.verticalScrollBar()
+            bar.setValue(bar.maximum())
 
     def _on_error(self, msg):
         self._on_log(f"❌ 检索失败: {msg}")
@@ -472,6 +615,7 @@ class SmartSearchDialog(QDialog):
         self.btn_start.setEnabled(True)
         self.btn_fetch.setEnabled(True)
         self.btn_stop.setEnabled(False)
+        self.btn_script.setEnabled(True)
         self.progress.setValue(100)
         self._maybe_finish_close()
 
@@ -486,6 +630,9 @@ class SmartSearchDialog(QDialog):
         if self._thread is not None and self._thread.isRunning():
             return
         if self._trend_thread is not None and self._trend_thread.isRunning():
+            return
+        if (self._script_thread is not None
+                and self._script_thread.isRunning()):
             return
         self._close_when_finished = False
         self.accept()
@@ -532,6 +679,13 @@ class SmartSearchDialog(QDialog):
             self._on_log("⏳ 热点抓取仍在进行，完成后自动关闭...")
             return
 
+        if (self._script_thread is not None
+                and self._script_thread.isRunning()):
+            event.ignore()
+            self._close_when_finished = True
+            self._on_log("⏳ 建议脚本生成中，完成后自动关闭...")
+            return
+
         event.accept()
 
     # ----------------------------------------------------------------
@@ -575,6 +729,17 @@ class SmartSearchDialog(QDialog):
         }
         QListWidget::item { padding: 4px; }
         QListWidget::item:selected { background-color: #2979FF; }
+        QListWidget::indicator {
+            width: 15px;
+            height: 15px;
+            border: 1px solid #55558A;
+            border-radius: 4px;
+            background-color: #0E0E20;
+        }
+        QListWidget::indicator:checked {
+            background-color: #2979FF;
+            border-color: #2979FF;
+        }
         QCheckBox, QRadioButton { color: #B0B0D0; background: transparent; spacing: 8px; }
         QPushButton {
             background-color: #2979FF;

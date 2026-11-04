@@ -2,6 +2,8 @@
 
 from types import SimpleNamespace
 
+import pytest
+
 from core.search_types import Hotspot, TrendAngle
 from core.trend_sources import (
     extract_keywords, fallback_angles, fetch_hn, fetch_v2ex, fetch_hotspots,
@@ -117,6 +119,48 @@ def test_fallback_angles_one_per_item():
     assert len(angles) == 2
     assert angles[0].title == "价格监控工具"
     assert angles[0].why == "原始热点"
+
+
+def test_fallback_angles_carry_hotspot_heat():
+    items = [
+        Hotspot("hn", "高热", "u1", score=100),
+        Hotspot("hn", "低热", "u2", score=10),
+    ]
+    angles = fallback_angles(items, max_angles=8)
+    assert [angle.heat for angle in angles] == pytest.approx([1.0, 0.0])
+    assert angles[0].heat_raw == 100
+    assert angles[0].heat_source == "hn"
+
+
+def test_fetch_hotspots_normalizes_heat_per_source(monkeypatch, tmp_path):
+    monkeypatch.setattr(trend_sources, "TREND_CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(trend_sources, "fetch_hn", lambda **kw: [
+        Hotspot("hn", "a", "u1", score=10),
+        Hotspot("hn", "b", "u2", score=30),
+    ])
+    monkeypatch.setattr(trend_sources, "fetch_v2ex", lambda **kw: [
+        Hotspot("v2ex", "c", "u3", score=5),
+        Hotspot("v2ex", "d", "u4", score=5),
+    ])
+    items = fetch_hotspots(force_refresh=True)
+    hn = [item for item in items if item.source == "hn"]
+    v2ex = [item for item in items if item.source == "v2ex"]
+    assert [item.heat for item in hn] == pytest.approx([0.0, 1.0])
+    assert [item.heat for item in v2ex] == pytest.approx([1.0, 1.0])
+
+
+def test_summarize_hotspots_maps_source_index_to_heat():
+    items = [
+        Hotspot("hn", "低热", "u1", score=10),
+        Hotspot("hn", "高热", "u2", score=100),
+    ]
+    client = _FakeClient([
+        '{"angles":[{"title":"角度","keywords":[],"why":"x","source_ids":[1]}]}',
+    ])
+    angles = summarize_hotspots(items, client, "m")
+    assert angles[0].heat == pytest.approx(1.0)
+    assert angles[0].heat_raw == 100
+    assert angles[0].heat_source == "hn"
 
 
 def test_summarize_hotspots_parses_json():

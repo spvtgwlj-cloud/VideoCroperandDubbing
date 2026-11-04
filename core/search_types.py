@@ -11,6 +11,9 @@ class TrendAngle:
     keywords: list[str]
     why: str
     source_ids: list[str] = field(default_factory=list)
+    heat: float = 0.0        # 同来源归一化热度（0-1），仅用于排序微调
+    heat_raw: int = 0        # 原始热度，用于展示
+    heat_source: str = ""    # "hn" | "v2ex"
 
 
 @dataclass
@@ -23,6 +26,7 @@ class Hotspot:
     score: int = 0
     comments: int = 0
     keywords: list[str] = field(default_factory=list)
+    heat: float = 0.0        # 同来源归一化热度（0-1）
 
 
 @dataclass
@@ -43,6 +47,9 @@ class Hit:
     score: float
     reason: str = ""
     angles: list[str] = field(default_factory=list)
+    heat: float = 0.0
+    heat_raw: int = 0
+    heat_source: str = ""
 
 
 @dataclass
@@ -59,6 +66,10 @@ class Clip:
     angles: list[str]
     clip_path: str = ""
     already_exported: bool = False
+    content_score: float = 0.0
+    heat: float = 0.0
+    heat_raw: int = 0
+    heat_source: str = ""
 
 
 @dataclass

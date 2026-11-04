@@ -13,7 +13,7 @@ import time
 from dataclasses import asdict
 from typing import Any, Callable
 
-from .search_types import Clip, Hit, MatchContext, SearchIndex
+from .search_types import Clip, Hit, MatchContext, SearchIndex, TrendAngle
 
 # ----------------------------------------------------------------
 # 阈值常量（设计文档 8.4 / 12）
@@ -24,6 +24,8 @@ PREFILTER_MIN_RATIO = 0.05
 LLM_CONFIDENCE_HIT = 0.5
 LLM_CONFIDENCE_MAYBE = 0.35
 KEYWORD_HIT_SCORE = 0.3
+ANGLE_ATTRIBUTION_MIN = 0.15
+HEAT_BONUS_MAX = 0.05
 LLM_TIMEOUT_SECONDS = 30
 LLM_MAX_CONSECUTIVE_FAILURES = 2
 DEFAULT_BATCH_SIZE = 10
@@ -50,14 +52,51 @@ def tokenize(text: str) -> list[str]:
     return tokens
 
 
-def _context_tokens(context: MatchContext) -> set[str]:
-    """query 与所有角度的标题/关键词 token 并集。"""
-    tokens = set(tokenize(context.query))
-    for angle in context.angles:
-        tokens.update(tokenize(angle.title))
-        for keyword in angle.keywords:
-            tokens.update(tokenize(keyword))
+def _angle_tokens(angle: TrendAngle) -> set[str]:
+    """单个角度的标题与关键词 token。"""
+    tokens = set(tokenize(angle.title))
+    for keyword in angle.keywords:
+        tokens.update(tokenize(keyword))
     return tokens
+
+
+def _score_segment(
+    segment_tokens: set[str], context: MatchContext,
+) -> tuple[float, list[TrendAngle], set[str]]:
+    """按信号独立计分，返回 (内容得分, 命中角度, 命中 token)。
+
+    query 与每个角度各自计算覆盖率后取最大值。分母只含单个信号的 token，
+    因此角度数量增加不会稀释得分。角度命中需达到 ANGLE_ATTRIBUTION_MIN
+    才计入关联角度，避免"沾一个词就算关联"。
+    """
+    if not segment_tokens:
+        return 0.0, [], set()
+
+    scores: list[float] = []
+    matched_tokens: set[str] = set()
+
+    query_tokens = set(tokenize(context.query))
+    if query_tokens:
+        query_matched = segment_tokens & query_tokens
+        matched_tokens |= query_matched
+        scores.append(len(query_matched) / len(query_tokens))
+
+    matched_angles: list[TrendAngle] = []
+    best_angle_score = 0.0
+    for angle in context.angles:
+        angle_tokens = _angle_tokens(angle)
+        if not angle_tokens:
+            continue
+        angle_matched = segment_tokens & angle_tokens
+        matched_tokens |= angle_matched
+        score = len(angle_matched) / len(angle_tokens)
+        best_angle_score = max(best_angle_score, score)
+        if score >= ANGLE_ATTRIBUTION_MIN:
+            matched_angles.append(angle)
+    if context.angles:
+        scores.append(best_angle_score)
+
+    return max(scores, default=0.0), matched_angles, matched_tokens
 
 
 def build_index(segments: list[dict], source_file: str,
@@ -78,31 +117,31 @@ def keyword_match(context: MatchContext, index: SearchIndex,
     min_score 可传 0.0 做“放宽兜底”：只要命中任意 token 就保留，
     用于混合语言/多 token 查询把得分压低而导致的假阴性。
     """
-    context_tokens = _context_tokens(context)
-    if not context_tokens:
+    if not tokenize(context.query) and not any(
+        _angle_tokens(angle) for angle in context.angles
+    ):
         return []
 
     hits: list[Hit] = []
     for i, segment in enumerate(index.segments):
         segment_tokens = set(tokenize(segment.get("text", "")))
-        matched = segment_tokens & context_tokens
-        score = len(matched) / max(1, len(context_tokens))
+        score, matched_angles, matched_tokens = _score_segment(
+            segment_tokens, context,
+        )
         if score < min_score:
             continue
 
-        angle_titles: list[str] = []
-        for angle in context.angles:
-            angle_tokens = set(tokenize(angle.title))
-            for keyword in angle.keywords:
-                angle_tokens.update(tokenize(keyword))
-            if angle_tokens & segment_tokens:
-                angle_titles.append(angle.title)
-
+        hottest = max(
+            matched_angles, key=lambda angle: angle.heat, default=None,
+        )
         hits.append(Hit(
             index=i,
             score=score,
-            reason=f"关键词命中: {', '.join(sorted(matched))}",
-            angles=angle_titles,
+            reason=f"关键词命中: {', '.join(sorted(matched_tokens))}",
+            angles=[angle.title for angle in matched_angles],
+            heat=hottest.heat if hottest else 0.0,
+            heat_raw=hottest.heat_raw if hottest else 0,
+            heat_source=hottest.heat_source if hottest else "",
         ))
 
     hits.sort(key=lambda hit: hit.score, reverse=True)
@@ -113,15 +152,15 @@ def prefilter(context: MatchContext, index: SearchIndex,
               threshold: float = PREFILTER_THRESHOLD) -> list[int]:
     """本地预筛候选句；候选过少或跨语言无交集时回退全量。"""
     total = len(index.segments)
-    context_tokens = _context_tokens(context)
-    if not context_tokens:
+    if not tokenize(context.query) and not any(
+        _angle_tokens(angle) for angle in context.angles
+    ):
         return list(range(total))
 
     candidates: list[int] = []
     for i, segment in enumerate(index.segments):
         segment_tokens = set(tokenize(segment.get("text", "")))
-        matched = segment_tokens & context_tokens
-        score = len(matched) / max(1, len(context_tokens))
+        score, _, _ = _score_segment(segment_tokens, context)
         if score >= threshold:
             candidates.append(i)
 
@@ -221,6 +260,9 @@ def merge_hits(
                 for angle in hit.angles:
                     if angle not in angles:
                         angles.append(angle)
+            content_score = sum(hit.score for hit in chunk) / len(chunk)
+            hottest = max(chunk, key=lambda hit: hit.heat)
+            clip_heat = hottest.heat
             clips.append(Clip(
                 source_file=source_file,
                 filekey8=filekey8,
@@ -229,9 +271,13 @@ def merge_hits(
                 matched_sentences=[
                     segments[hit.index].get("text", "") for hit in chunk
                 ],
-                score=sum(hit.score for hit in chunk) / len(chunk),
+                score=content_score + HEAT_BONUS_MAX * clip_heat,
                 reason="；".join(reasons)[:200],
                 angles=angles,
+                content_score=content_score,
+                heat=clip_heat,
+                heat_raw=hottest.heat_raw,
+                heat_source=hottest.heat_source,
             ))
 
     # 7. 重叠去重：保留 score 更高者
@@ -434,9 +480,12 @@ def build_match_prompt(context: MatchContext, sentences: list[str]) -> str:
     """构造批量打分 prompt；句子编号从 0 开始。"""
     lines = [
         "你是视频内容分析助手。根据用户需求与热点角度，判断每句转写是否相关。",
+        "判定要严格：只有句子本身包含可独立成片的明确信息"
+        "（观点、数据、方法、冲突或结论）时才标 relevant=true；"
+        "仅仅提到关键词不算。",
         "要求：跨语言语义匹配；只返回 JSON 数组；每项格式：",
         '{"i": 句子编号, "relevant": true/false, "confidence": 0-1, '
-        '"reason": "简短中文理由", "angle": "关联角度标题或空字符串"}',
+        '"reason": "简短中文理由", "angle_index": 关联角度编号（无关联填 -1）}',
         "",
         f"用户需求: {context.query or '（无，仅按热点角度匹配）'}",
     ]
@@ -467,7 +516,67 @@ def parse_match_response(raw: str, expected_count: int) -> list[dict]:
     return [item for item in data if isinstance(item, dict)]
 
 
-def _hit_from_item(item: dict, segment_index: int) -> Hit | None:
+def _resolve_angle_entries(
+    item: dict, angles: list[TrendAngle],
+) -> tuple[list[str], float, int, str]:
+    """解析 LLM 返回的 angle_index / angle，返回标题与最高热度。
+
+    兼容编号、编号字符串、角度标题与旧版自由文本；无法匹配的标题保留
+    用于展示，但不带热度。
+    """
+    raw = item.get("angle_index")
+    if raw is None:
+        raw = item.get("angle")
+    if raw is None:
+        return [], 0.0, 0, ""
+    entries = raw if isinstance(raw, list) else [raw]
+
+    titles: list[str] = []
+    resolved: list[TrendAngle] = []
+    for entry in entries:
+        if entry is None or isinstance(entry, bool):
+            continue
+        match: TrendAngle | None = None
+        if isinstance(entry, int):
+            if 0 <= entry < len(angles):
+                match = angles[entry]
+        elif isinstance(entry, str):
+            text = entry.strip()
+            if not text:
+                continue
+            if text.lstrip("-").isdigit():
+                index = int(text)
+                if 0 <= index < len(angles):
+                    match = angles[index]
+            if match is None:
+                match = next(
+                    (angle for angle in angles if text == angle.title), None,
+                )
+            if match is None:
+                match = next(
+                    (angle for angle in angles
+                     if text in angle.title or angle.title in text),
+                    None,
+                )
+            if match is None:
+                titles.append(text)
+                continue
+        if match is not None:
+            resolved.append(match)
+            if match.title not in titles:
+                titles.append(match.title)
+
+    hottest = max(resolved, key=lambda angle: angle.heat, default=None)
+    return (
+        titles,
+        hottest.heat if hottest else 0.0,
+        hottest.heat_raw if hottest else 0,
+        hottest.heat_source if hottest else "",
+    )
+
+
+def _hit_from_item(item: dict, segment_index: int,
+                   angles: list[TrendAngle] | None = None) -> Hit | None:
     if not item.get("relevant"):
         return None
     try:
@@ -477,19 +586,17 @@ def _hit_from_item(item: dict, segment_index: int) -> Hit | None:
     if confidence < LLM_CONFIDENCE_HIT:
         return None
 
-    raw_angle = item.get("angle")
-    if isinstance(raw_angle, list):
-        angles = [str(angle) for angle in raw_angle if angle]
-    elif raw_angle:
-        angles = [str(raw_angle)]
-    else:
-        angles = []
-
+    titles, heat, heat_raw, heat_source = _resolve_angle_entries(
+        item, angles or [],
+    )
     return Hit(
         index=segment_index,
         score=confidence,
         reason=str(item.get("reason", "")),
-        angles=angles,
+        angles=titles,
+        heat=heat,
+        heat_raw=heat_raw,
+        heat_source=heat_source,
     )
 
 
@@ -514,7 +621,7 @@ def llm_match_sentence(context: MatchContext, sentence: str, segment_index: int,
         data = data[0] if data else {}
     if not isinstance(data, dict):
         return None
-    return _hit_from_item(data, segment_index)
+    return _hit_from_item(data, segment_index, context.angles)
 
 
 def llm_match_sentences(
@@ -527,12 +634,19 @@ def llm_match_sentences(
     log_cb: Callable[[str], None] | None = None,
     progress_cb: Callable[[float], None] | None = None,
     should_stop: Callable[[], bool] | None = None,
+    diagnostics: dict | None = None,
 ) -> list[Hit]:
     """批量 LLM 打分；连续两批失败时抛 LLMUnavailableError。
 
     progress_cb 接收 0-1 的完成比例，供 UI 更新进度条；
-    should_stop 在每个批次开始前检查，用于响应停止按钮。
+    should_stop 在每个批次开始前检查，用于响应停止按钮；
+    diagnostics 可选，用于累计传输错误/解析错误/成功批次数。
     """
+    if diagnostics is not None:
+        diagnostics.setdefault("transport_errors", 0)
+        diagnostics.setdefault("parse_errors", 0)
+        diagnostics.setdefault("batches_ok", 0)
+
     hits: list[Hit] = []
     consecutive_failures = 0
     total = max(1, len(sentences))
@@ -561,6 +675,8 @@ def llm_match_sentences(
         except Exception as exc:
             # 网络/超时失败：不逐句重试，连续两批后熔断
             consecutive_failures += 1
+            if diagnostics is not None:
+                diagnostics["transport_errors"] += 1
             if consecutive_failures >= LLM_MAX_CONSECUTIVE_FAILURES:
                 raise LLMUnavailableError(str(exc)) from exc
             if log_cb is not None:
@@ -573,6 +689,8 @@ def llm_match_sentences(
         except Exception as exc:
             # 返回格式错误：才做单句重试
             consecutive_failures += 1
+            if diagnostics is not None:
+                diagnostics["parse_errors"] += 1
             if consecutive_failures >= LLM_MAX_CONSECUTIVE_FAILURES:
                 raise LLMUnavailableError(str(exc)) from exc
             if log_cb is not None:
@@ -590,11 +708,15 @@ def llm_match_sentences(
             continue
 
         consecutive_failures = 0
+        if diagnostics is not None:
+            diagnostics["batches_ok"] += 1
         for position, item in enumerate(items):
             local_index = item.get("i", position)
             if not isinstance(local_index, int) or not 0 <= local_index < len(batch_indexes):
                 local_index = position
-            hit = _hit_from_item(item, batch_indexes[local_index])
+            hit = _hit_from_item(
+                item, batch_indexes[local_index], context.angles,
+            )
             if hit is not None:
                 hits.append(hit)
 

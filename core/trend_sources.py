@@ -111,7 +111,30 @@ def fetch_hotspots(sources=("hn", "v2ex"), limit: int = 20,
         if fetched:
             save_trend_cache(source, fetched)
             items.extend(fetched)
+    _normalize_heat(items)
     return items
+
+
+def _normalize_heat(items: list[Hotspot]) -> None:
+    """按来源分别做 min-max 归一化。
+
+    HN 的 points 与 V2EX 的 replies 不可直接比较，因此只在同来源内归一化；
+    同来源全部同分且大于 0 时统一视为最热（heat=1.0）。
+    """
+    by_source: dict[str, list[Hotspot]] = {}
+    for item in items:
+        by_source.setdefault(item.source, []).append(item)
+
+    for group in by_source.values():
+        scores = [max(0, int(item.score or 0)) for item in group]
+        highest = max(scores)
+        lowest = min(scores)
+        for item in group:
+            score = max(0, int(item.score or 0))
+            if highest > lowest:
+                item.heat = (score - lowest) / (highest - lowest)
+            else:
+                item.heat = 1.0 if highest > 0 else 0.0
 
 
 def _trend_cache_path(source: str) -> str:
@@ -185,6 +208,7 @@ def extract_keywords(text: str, max_keywords: int = 6) -> list[str]:
 def fallback_angles(items: list[Hotspot],
                     max_angles: int = 8) -> list[TrendAngle]:
     """LLM 不可用时的兜底：每条热点标题直接作为一个角度。"""
+    _normalize_heat(items)
     angles: list[TrendAngle] = []
     for item in items[:max_angles]:
         angles.append(TrendAngle(
@@ -192,6 +216,9 @@ def fallback_angles(items: list[Hotspot],
             keywords=extract_keywords(item.title),
             why="原始热点",
             source_ids=[f"{item.source}:{item.url}"],
+            heat=item.heat,
+            heat_raw=item.score,
+            heat_source=item.source,
         ))
     return angles
 
@@ -203,24 +230,54 @@ def _strip_code_fence(raw: str) -> str:
     return text.strip()
 
 
+def _resolve_source_items(raw_ids: list, items: list[Hotspot]) -> list[Hotspot]:
+    """把 LLM 返回的热点编号或 URL 解析回热点对象。"""
+    resolved: list[Hotspot] = []
+    for raw in raw_ids:
+        if isinstance(raw, bool):
+            continue
+        item: Hotspot | None = None
+        if isinstance(raw, int) and 0 <= raw < len(items):
+            item = items[raw]
+        elif isinstance(raw, str):
+            text = raw.strip()
+            if text.lstrip("-").isdigit():
+                index = int(text)
+                if 0 <= index < len(items):
+                    item = items[index]
+            if item is None:
+                for candidate in items:
+                    if text in (candidate.url,
+                                f"{candidate.source}:{candidate.url}"):
+                        item = candidate
+                        break
+        if item is not None:
+            resolved.append(item)
+    return resolved
+
+
 def summarize_hotspots(items: list[Hotspot], client: Any, model: str,
                        max_angles: int = 8) -> list[TrendAngle]:
     """用 LLM 把热点归纳成爆点角度；任何失败都退回原始标题。"""
     if not items:
         return []
+    _normalize_heat(items)
+    visible_items = items[:40]
 
     lines = [
         "你是内容选题分析助手。根据以下 HN/V2EX 热点，"
         "归纳出适合在短视频中制作的爆点角度。",
         '只返回 JSON：{"angles":[{"title":"角度标题","keywords":["关键词"],'
-        '"why":"推荐理由","source_ids":["来源:链接"]}]}',
+        '"why":"推荐理由","source_ids":[热点编号]}]}',
+        "source_ids 使用热点列表开头的编号（整数数组）。",
         f"最多 {max_angles} 个角度。",
         "",
         "热点列表:",
     ]
-    for item in items[:40]:
+    for index, item in enumerate(visible_items):
         lines.append(
-            f"- [{item.source}] {item.title} | 热度 {item.score} | {item.url}"
+            f"[{index}] [{item.source}] {item.title} | "
+            f"热度 {item.score} | {item.url}"
         )
 
     try:
@@ -249,11 +306,18 @@ def summarize_hotspots(items: list[Hotspot], client: Any, model: str,
             source_ids = entry.get("source_ids")
             if not isinstance(source_ids, list):
                 source_ids = []
+            matched_items = _resolve_source_items(source_ids, visible_items)
+            hottest = max(
+                matched_items, key=lambda item: item.heat, default=None,
+            )
             angles.append(TrendAngle(
                 title=title,
                 keywords=[str(keyword) for keyword in keywords],
                 why=str(entry.get("why", "")),
                 source_ids=[str(source_id) for source_id in source_ids],
+                heat=hottest.heat if hottest else 0.0,
+                heat_raw=hottest.score if hottest else 0,
+                heat_source=hottest.source if hottest else "",
             ))
         return angles or fallback_angles(items, max_angles)
     except Exception:
