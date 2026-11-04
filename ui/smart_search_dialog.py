@@ -18,7 +18,7 @@ from core.script_thread import ScriptSuggestionThread
 from core.search_thread import SmartSearchThread
 from core.search_types import TrendAngle
 from core.smart_search import export_report
-from core.trend_sources import extract_keywords
+from core.trend_sources import extract_keywords, fallback_angles
 from core.trend_thread import TrendFetchThread
 from ui.script_dialog import ScriptDialog
 
@@ -392,7 +392,17 @@ class SmartSearchDialog(QDialog):
 
     def _collect_angles(self) -> list[TrendAngle]:
         if self.radio_auto.isChecked():
-            return list(self._auto_angles)
+            if self._auto_angles:
+                return list(self._auto_angles)
+            # 自动归纳是异步的；列表已回填但归纳尚未完成时，
+            # 先用原始热点标题兜底，避免误报“请先抓取热点角度”。
+            hotspots = [
+                self.trend_list.item(i).data(Qt.UserRole)
+                for i in range(self.trend_list.count())
+            ]
+            return fallback_angles([
+                hotspot for hotspot in hotspots if hotspot is not None
+            ])
 
         angles: list[TrendAngle] = []
         for i in range(self.trend_list.count()):
@@ -446,7 +456,20 @@ class SmartSearchDialog(QDialog):
         query = self.input_query.text().strip()
         angles = self._collect_angles()
         if not query and not angles:
-            return self._on_log("⚠️ 请输入提示词，或先抓取/勾选热点角度")
+            if (self._trend_thread is not None
+                    and self._trend_thread.isRunning()):
+                return self._on_log(
+                    "⚠️ 热点抓取/归纳仍在进行，请稍候；"
+                    "或输入提示词直接检索"
+                )
+            return self._on_log(
+                "⚠️ 请输入提示词，或先抓取热榜（自动归纳/手动勾选）"
+            )
+        if (not query and self.radio_auto.isChecked()
+                and not self._auto_angles and self.trend_list.count()):
+            self._on_log(
+                "ℹ️ 自动归纳尚未完成，本次先使用原始热点标题检索"
+            )
 
         out_dir = self.input_out_dir.text().strip()
         if not out_dir:

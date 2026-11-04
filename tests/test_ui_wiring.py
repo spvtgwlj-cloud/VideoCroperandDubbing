@@ -122,6 +122,71 @@ def test_manual_mode_toggles_hotspot_checkboxes(app):
     dialog.close()
 
 
+def test_auto_mode_falls_back_to_raw_hotspots_when_angles_not_ready(app):
+    from core.search_types import Hotspot
+    from ui.smart_search_dialog import SmartSearchDialog
+
+    dialog = SmartSearchDialog()
+    dialog._on_trends_done([
+        Hotspot("hn", "AI 热点", "u", score=100, heat=1.0),
+    ])
+    assert dialog.radio_auto.isChecked()
+    assert dialog._auto_angles == []
+
+    angles = dialog._collect_angles()
+    assert len(angles) == 1
+    assert angles[0].title == "AI 热点"
+    assert angles[0].heat == 1.0
+    dialog.close()
+
+
+def test_auto_mode_prefers_summarized_angles(app):
+    from core.search_types import Hotspot, TrendAngle
+    from ui.smart_search_dialog import SmartSearchDialog
+
+    dialog = SmartSearchDialog()
+    dialog._on_trends_done([
+        Hotspot("hn", "原始标题", "u", score=100),
+    ])
+    dialog._auto_angles = [TrendAngle("AI 归纳", [], "")]
+
+    assert [angle.title for angle in dialog._collect_angles()] == ["AI 归纳"]
+    dialog.close()
+
+
+def test_manual_mode_still_requires_checkbox(app):
+    from PyQt5.QtCore import Qt
+    from core.search_types import Hotspot
+    from ui.smart_search_dialog import SmartSearchDialog
+
+    dialog = SmartSearchDialog()
+    dialog.radio_manual.setChecked(True)
+    dialog._on_trends_done([
+        Hotspot("hn", "原始标题", "u", score=100),
+    ])
+    assert dialog._collect_angles() == []
+
+    dialog.trend_list.item(0).setCheckState(Qt.Checked)
+    assert [angle.title for angle in dialog._collect_angles()] == ["原始标题"]
+    dialog.close()
+
+
+def test_start_search_explains_running_trend_fetch(app, tmp_path):
+    from ui.smart_search_dialog import SmartSearchDialog
+
+    video = tmp_path / "a.mp4"
+    video.write_bytes(b"x")
+    dialog = SmartSearchDialog()
+    dialog.input_single.setText(str(video))
+    dialog.input_query.clear()
+    dialog._trend_thread = _FakeRunningThread()
+
+    dialog.start_search()
+
+    assert "仍在进行" in dialog.status_label.text()
+    dialog.close()
+
+
 def test_script_dialog_renders_markdown(app):
     from core.script_suggest import (
         ScriptSection, SuggestedScript, render_script_markdown,
