@@ -2,7 +2,9 @@
 
 from types import SimpleNamespace
 
+import httpx
 import pytest
+from openai import APITimeoutError
 
 import core.script_thread as st
 from core.script_suggest import ScriptSection, SuggestedScript
@@ -30,6 +32,16 @@ class _FakeCompletions:
         item = self.responses.pop(0)
         if isinstance(item, Exception):
             raise item
+        if kwargs.get("stream"):
+            midpoint = len(item) // 2
+            return iter([
+                SimpleNamespace(choices=[SimpleNamespace(
+                    delta=SimpleNamespace(content=item[:midpoint]),
+                )]),
+                SimpleNamespace(choices=[SimpleNamespace(
+                    delta=SimpleNamespace(content=item[midpoint:]),
+                )]),
+            ])
         return SimpleNamespace(
             choices=[SimpleNamespace(message=SimpleNamespace(content=item))],
         )
@@ -57,6 +69,14 @@ def _patch_llm(monkeypatch, responses):
     )
     monkeypatch.setattr(st, "OpenAI", lambda **kw: client)
     return client
+
+
+def _timeout_error():
+    return APITimeoutError(
+        request=httpx.Request(
+            "POST", "https://example.com/v1/chat/completions",
+        ),
+    )
 
 
 def _run(thread):
@@ -115,6 +135,61 @@ def test_thread_uses_extended_timeout_and_token_limit(monkeypatch, tmp_path):
     call = client.chat.completions.calls[0]
     assert call["timeout"] == 120
     assert call["max_tokens"] == 1800
+    assert call["stream"] is True
+
+
+def test_thread_retries_with_shorter_prompt_on_timeout(monkeypatch, tmp_path):
+    segments = [
+        {"start": float(i), "end": float(i + 1), "text": f"句子{i}"}
+        for i in range(8)
+    ]
+    _patch_cached_transcript(monkeypatch, segments=segments)
+    client = _patch_llm(monkeypatch, [_timeout_error(), SCRIPT_JSON])
+    monkeypatch.setattr(
+        st, "save_script",
+        lambda script, out_dir: ("/tmp/s.json", "/tmp/s.md"),
+    )
+
+    thread = st.ScriptSuggestionThread(
+        "demo.mp4", [TrendAngle("角度", [], "")], "", str(tmp_path),
+    )
+    scripts, errors = _run(thread)
+
+    assert errors == []
+    assert len(scripts) == 1
+    prompts = [
+        call["messages"][0]["content"]
+        for call in client.chat.completions.calls
+    ]
+    assert len(prompts) == 2
+    assert "句子7" in prompts[0]
+    assert "句子7" not in prompts[1]
+    assert "句子0" in prompts[1]
+    assert all(
+        call["stream"] is True for call in client.chat.completions.calls
+    )
+
+
+def test_thread_reports_clear_error_when_short_retry_times_out(
+    monkeypatch, tmp_path,
+):
+    segments = [
+        {"start": float(i), "end": float(i + 1), "text": f"句子{i}"}
+        for i in range(4)
+    ]
+    _patch_cached_transcript(monkeypatch, segments=segments)
+    client = _patch_llm(
+        monkeypatch, [_timeout_error(), _timeout_error()],
+    )
+
+    thread = st.ScriptSuggestionThread(
+        "demo.mp4", [TrendAngle("角度", [], "")], "", str(tmp_path),
+    )
+    scripts, errors = _run(thread)
+
+    assert scripts == []
+    assert errors and "超时" in errors[0] and "缩短" in errors[0]
+    assert len(client.chat.completions.calls) == 2
 
 
 def test_thread_errors_without_api_key(monkeypatch, tmp_path):

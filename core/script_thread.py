@@ -4,7 +4,7 @@ import os
 import tempfile
 
 from PyQt5.QtCore import QThread, pyqtSignal
-from openai import OpenAI
+from openai import APITimeoutError, OpenAI
 
 from .llm_config import get_translation_config, load_llm_config
 from .script_suggest import (
@@ -114,14 +114,58 @@ class ScriptSuggestionThread(QThread):
         return angles
 
     def _call_llm(self, client, model: str, prompt: str) -> str:
+        """流式生成脚本；超时按“多久没收到新片段”计算，而非总时长。"""
         response = client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.6,
             timeout=SCRIPT_LLM_TIMEOUT_SECONDS,
             max_tokens=SCRIPT_LLM_MAX_TOKENS,
+            stream=True,
         )
-        return response.choices[0].message.content or ""
+        # 兼容不支持流式、直接返回完整对象的服务端。
+        if not hasattr(response, "__iter__"):
+            return response.choices[0].message.content or ""
+
+        parts: list[str] = []
+        for chunk in response:
+            choices = getattr(chunk, "choices", None)
+            if not choices:
+                continue
+            delta = getattr(choices[0], "delta", None)
+            content = getattr(delta, "content", None) if delta else None
+            if isinstance(content, str) and content:
+                parts.append(content)
+        return "".join(parts)
+
+    def _call_with_timeout_retry(self, client, model: str,
+                                 segments: list[dict], angles: list,
+                                 prompt: str) -> str:
+        """超时后改用一半转写句子重试一次，避免原样重试再次超时。"""
+        try:
+            return self._call_llm(client, model, prompt)
+        except (APITimeoutError, TimeoutError) as exc:
+            if len(segments) <= 1:
+                raise RuntimeError(
+                    "建议脚本生成超时：模型未在限定时间内完成；"
+                    "请稍后重试或更换更快的模型。"
+                ) from exc
+
+            short_segments = segments[: max(1, len(segments) // 2)]
+            self.log_msg.emit(
+                f"⚠️ 脚本生成超时，改用前 {len(short_segments)} 句"
+                "转写重试一次..."
+            )
+            short_prompt = build_script_prompt(
+                short_segments, angles, self.query,
+            )
+            try:
+                return self._call_llm(client, model, short_prompt)
+            except (APITimeoutError, TimeoutError) as retry_exc:
+                raise RuntimeError(
+                    "建议脚本生成超时：模型未在限定时间内完成，"
+                    "缩短转写后重试仍超时。请稍后重试或更换更快的模型。"
+                ) from retry_exc
 
     def run(self):
         try:
@@ -145,13 +189,15 @@ class ScriptSuggestionThread(QThread):
 
             prompt = build_script_prompt(segments, angles, self.query)
             self.log_msg.emit("🧠 正在生成建议脚本（可能需要 1-2 分钟）...")
-            raw = self._call_llm(client, model, prompt)
+            raw = self._call_with_timeout_retry(
+                client, model, segments, angles, prompt,
+            )
             try:
                 script = parse_script_response(raw, segments)
             except ValueError as exc:
                 self.log_msg.emit(f"⚠️ 脚本 JSON 解析失败，重试一次: {exc}")
-                raw = self._call_llm(
-                    client, model,
+                raw = self._call_with_timeout_retry(
+                    client, model, segments, angles,
                     prompt + "\n\n只返回 JSON，不要代码块或解释。",
                 )
                 script = parse_script_response(raw, segments)
