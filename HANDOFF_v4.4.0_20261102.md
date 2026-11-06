@@ -176,7 +176,13 @@ python3 -m pytest tests/ -q    # 176 passed, 1 skipped（截至 2026-11-04）
 ### 分支与回退
 
 - 基线：`abff400` / 标签 `v4.3.4-baseline`
-- 开发分支：`feature/v4.4.0-smart-search`
+- 开发分支：`feature/v4.4.0-smart-search`（已推送）
+- 远程分支：`origin/feature/v4.4.0-smart-search` @ `ccfa9f2`
+- PR：https://github.com/spvtgwlj-cloud/VideoCroperandDubbing/pull/1
+  - Base：`main`；Head：`feature/v4.4.0-smart-search`；状态：OPEN
+  - 范围：以 v4.3.3 `main` 为基，包含 v4.3.4 基线与 v4.4.0 智能检索增强
+  - 规模：43 files, +8593 / -1365
+- 远程 main：2026-11-06 已从空 `init`（`39e333f`）力推为本地 `1436f25`（v4.3.3），与功能分支共享历史
 - 运行时关闭：`AI_VIDEO_SMART_SEARCH=0`
 - 代码回退：`git checkout v4.3.4-baseline`
 
@@ -235,7 +241,7 @@ bash build.sh mac     # → dist/AI视频配音Pro.app (~1.1GB)
 | v4.3.2 | 06-26 | AI 管线复用 + H.265 tag 修复 + 配置保存修复 |
 | v4.3.3 | 06-29 | 启动画面（Splash Screen）— 纯代码绘制，零资源依赖 |
 | v4.3.4 | 07-16 | LLM API 供应商配置化 + 平台「自定义」+ UI 修复 |
-| **v4.4.0** | **11-02 / 11-03 / 11-04** | **智能视频检索 — 热点/批量/缓存/独立窗口；11-03 增加热榜关联优化、空结果诊断与建议脚本；11-04 修复自动归纳竞态、建议脚本改为流式并缩短超时重试** |
+| **v4.4.0** | **11-02 / 11-03 / 11-04 / 11-06** | **智能视频检索 — 热点/批量/缓存/独立窗口；11-03 增加热榜关联优化、空结果诊断与建议脚本；11-04 修复自动归纳竞态、建议脚本改为流式并缩短超时重试；11-06 推送功能分支并创建 PR #1** |
 | **v4.5.0** | **11-02** | **纯本地视觉内容检索（设计阶段）** |
 
 ---
