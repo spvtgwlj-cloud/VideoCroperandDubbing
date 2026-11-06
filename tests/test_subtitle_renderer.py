@@ -270,6 +270,47 @@ class TestOverlayRendering:
             f"标题未居中: 左侧={left_yellow}, 右侧={right_yellow}"
         )
 
+    def test_bilingual_secondary_below_renders_below_main(self):
+        """secondary_below=True 时小号英文应位于中文主字幕下方。"""
+        import numpy as np
+
+        frame = _make_test_frame(720, 1280)
+        out = add_subtitle(
+            frame,
+            "中文主字幕",
+            original_text="English secondary",
+            enable_subtitle=True,
+            subtitle_style={
+                "color": "黄色（推荐）",
+                "font_size": 0.048,
+                "bg_enabled": False,
+                "bilingual": True,
+                "secondary_below": True,
+                "portrait_margin": 0.10,
+            },
+        )
+
+        yellow = (
+            (out[:, :, 0] < 120)
+            & (out[:, :, 1] > 180)
+            & (out[:, :, 2] > 180)
+        )
+        gray = (
+            (out[:, :, 0] > 130) & (out[:, :, 0] < 220)
+            & (out[:, :, 1] > 130) & (out[:, :, 1] < 220)
+            & (out[:, :, 2] > 130) & (out[:, :, 2] < 220)
+        )
+        yellow_rows = np.where(yellow.any(axis=1))[0]
+        gray_rows = np.where(gray.any(axis=1))[0]
+
+        assert len(yellow_rows) > 0, "未检测到中文主字幕"
+        assert len(gray_rows) > 0, "未检测到英文副字幕"
+        assert gray_rows.min() > yellow_rows.max(), (
+            f"英文副字幕未在中文下方: "
+            f"yellow={yellow_rows.min()}-{yellow_rows.max()}, "
+            f"gray={gray_rows.min()}-{gray_rows.max()}"
+        )
+
     def test_overlay_sharer_appears(self):
         """分享人以白色文字+紫色渐变背景渲染，渐变从左到右渐隐"""
         import cv2

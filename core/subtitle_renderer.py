@@ -181,6 +181,7 @@ def add_subtitle(frame, text, original_text="", enable_subtitle=True, subtitle_s
     portrait_margin = style.get("portrait_margin", 0.25)
     landscape_margin = style.get("landscape_margin", 0.15)
     bilingual = style.get("bilingual", False)
+    secondary_below = bool(style.get("secondary_below", False))
     overlay_title = style.get("overlay_title", "")
     overlay_sharer = style.get("overlay_sharer", "")
     GAP_FONT_LINES = 1  # 字幕行间距（用于 overlay 元素定位）
@@ -277,7 +278,15 @@ def add_subtitle(frame, text, original_text="", enable_subtitle=True, subtitle_s
         bottom_margin = int(img_h * landscape_margin)
     else:
         bottom_margin = int(img_h * portrait_margin)
-    y = max(10, img_h - text_h - bottom_margin)
+
+    gap_px = 0
+    if bilingual and orig_wrapped:
+        gap_px = max(4, int(font_size * GAP_FONT_LINES))
+    if bilingual and orig_wrapped and secondary_below:
+        # 主字幕在上一行，小号副字幕在其下方，整块仍贴底。
+        y = max(10, img_h - (text_h + gap_px + orig_text_h) - bottom_margin)
+    else:
+        y = max(10, img_h - text_h - bottom_margin)
 
     shadow_color = (0, 0, 0)
     bold_width = max(1, int(font_size * 0.025))
@@ -287,17 +296,20 @@ def add_subtitle(frame, text, original_text="", enable_subtitle=True, subtitle_s
     # 双语原文：在译文上方间隔 2 个字体行
     # ========================================================
     if bilingual and orig_wrapped:
-        gap_px = max(4, int(font_size * GAP_FONT_LINES))  # 按译文字号计算间距
-
         orig_bbox_full = draw.textbbox((0, 0), orig_wrapped, font=orig_font, align="center")
         orig_w = orig_bbox_full[2] - orig_bbox_full[0]
-        # 原文底部 = 译文顶部 - gap
-        orig_y = max(10, y - gap_px - orig_text_h)
         orig_x = (img_w - orig_w) // 2
 
-        # ===== 防重叠：原文与译文间距不足时跳过原文渲染 =====
-        MINIMUM_GAP_PX = max(4, int(font_size * 0.3))
-        _skip_original = (orig_y + orig_text_h + MINIMUM_GAP_PX > y)
+        if secondary_below:
+            # 副字幕放在主字幕下方；整块已经按总高度上移。
+            orig_y = y + text_h + gap_px
+            _skip_original = (orig_y + orig_text_h > img_h - 2)
+        else:
+            # 原文底部 = 译文顶部 - gap
+            orig_y = max(10, y - gap_px - orig_text_h)
+            # ===== 防重叠：原文与译文间距不足时跳过原文渲染 =====
+            MINIMUM_GAP_PX = max(4, int(font_size * 0.3))
+            _skip_original = (orig_y + orig_text_h + MINIMUM_GAP_PX > y)
 
         gray_color = (180, 180, 180)
         orig_bold = max(1, int(orig_font_size * 0.02))

@@ -6,15 +6,17 @@ import subprocess
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
-    QAbstractItemView, QAbstractScrollArea, QButtonGroup, QCheckBox, QDialog,
-    QDoubleSpinBox, QFileDialog, QFormLayout, QFrame, QGroupBox, QHBoxLayout,
-    QLabel, QLineEdit, QListWidget, QListWidgetItem, QMessageBox,
-    QProgressBar, QPushButton, QRadioButton, QScrollArea, QSpinBox,
-    QTextEdit, QVBoxLayout, QWidget,
+    QAbstractItemView, QAbstractScrollArea, QButtonGroup, QCheckBox,
+    QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QFormLayout, QFrame,
+    QGroupBox, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
+    QMessageBox, QProgressBar, QPushButton, QRadioButton, QScrollArea,
+    QSpinBox, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from core.script_suggest import render_script_markdown
 from core.script_thread import ScriptSuggestionThread
+from core.semantic_clip import render_social_copy
+from core.semantic_clip_thread import SemanticClipThread
 from core.search_params import (
     DEFAULT_SEARCH_PARAMS, load_search_params, save_search_params,
 )
@@ -46,6 +48,7 @@ class SmartSearchDialog(QDialog):
         self._thread = None
         self._trend_thread = None
         self._script_thread = None
+        self._semantic_thread = None
 
         self._init_ui()
         self._apply_style()
@@ -125,6 +128,17 @@ class SmartSearchDialog(QDialog):
         group = QGroupBox("② 检索意图")
         layout = QVBoxLayout(group)
 
+        search_mode_row = QHBoxLayout()
+        search_mode_row.addWidget(QLabel("模式:"))
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItems(["智能检索", "智能切片"])
+        self.mode_combo.currentIndexChanged.connect(
+            self._on_search_mode_changed,
+        )
+        search_mode_row.addWidget(self.mode_combo, 1)
+        search_mode_row.addStretch()
+        layout.addLayout(search_mode_row)
+
         query_row = QHBoxLayout()
         query_row.addWidget(QLabel("提示词:"))
         self.input_query = QLineEdit()
@@ -154,18 +168,18 @@ class SmartSearchDialog(QDialog):
         trend_row.addStretch()
         layout.addLayout(trend_row)
 
-        mode_row = QHBoxLayout()
+        angle_mode_row = QHBoxLayout()
         self.radio_auto = QRadioButton("自动归纳")
         self.radio_auto.setChecked(True)
         self.radio_manual = QRadioButton("手动勾选")
         self.mode_group = QButtonGroup(self)
         self.mode_group.addButton(self.radio_auto)
         self.mode_group.addButton(self.radio_manual)
-        mode_row.addWidget(QLabel("模式:"))
-        mode_row.addWidget(self.radio_auto)
-        mode_row.addWidget(self.radio_manual)
-        mode_row.addStretch()
-        layout.addLayout(mode_row)
+        angle_mode_row.addWidget(QLabel("角度来源:"))
+        angle_mode_row.addWidget(self.radio_auto)
+        angle_mode_row.addWidget(self.radio_manual)
+        angle_mode_row.addStretch()
+        layout.addLayout(angle_mode_row)
 
         self.trend_list = QListWidget()
         self.trend_list.setMaximumHeight(130)
@@ -479,6 +493,23 @@ class SmartSearchDialog(QDialog):
             self._set_item_checkable(self.trend_list.item(i), manual)
         self.angle_label.setVisible(not manual)
 
+    def _on_search_mode_changed(self):
+        """切换智能检索 / 智能切片，并禁用切片模式不使用的参数。"""
+        semantic = self.mode_combo.currentIndex() == 1
+        self.btn_start.setText("开始智能切片" if semantic else "开始检索")
+        for widget in (
+            self.spin_min_dur, self.spin_max_dur, self.spin_top_k,
+            self.chk_deep, self.chk_force_export, self.chk_relaxed,
+        ):
+            widget.setEnabled(not semantic)
+        if semantic:
+            self._set_status(
+                "智能切片：最多 3 条/视频，40-180 秒，"
+                "输出竖屏 1080×1920 + 中英双语硬字幕",
+            )
+        else:
+            self._set_status("准备就绪")
+
     # ----------------------------------------------------------------
     # 检索
     # ----------------------------------------------------------------
@@ -488,6 +519,11 @@ class SmartSearchDialog(QDialog):
             return self._on_log("⚠️ 检索仍在进行，请先停止")
         if self._script_thread is not None and self._script_thread.isRunning():
             return self._on_log("⚠️ 建议脚本仍在生成，请稍候")
+        if (self._semantic_thread is not None
+                and self._semantic_thread.isRunning()):
+            return self._on_log("⚠️ 智能切片仍在进行，请稍候")
+        if self.mode_combo.currentIndex() == 1:
+            return self.start_semantic_clip()
 
         scope = self._collect_scope()
         if not scope:
@@ -564,6 +600,92 @@ class SmartSearchDialog(QDialog):
         if self._thread is not None and self._thread.isRunning():
             self._thread.stop()
             self._on_log("⏹️ 正在停止（当前视频处理完后退出）...")
+            return
+        if (self._semantic_thread is not None
+                and self._semantic_thread.isRunning()):
+            self._semantic_thread.stop()
+            self._on_log("⏹️ 正在停止智能切片（当前片段完成后退出）...")
+
+    def start_semantic_clip(self):
+        """整段语义切片：输出竖屏 + 中英双语硬字幕成片。"""
+        if (self._trend_thread is not None
+                and self._trend_thread.isRunning()):
+            return self._on_log("⚠️ 热点抓取仍在进行，请稍候")
+        scope = self._collect_scope()
+        if not scope:
+            return self._on_log("⚠️ 请选择有效的视频文件或文件夹")
+        video = scope[0]
+        if len(scope) > 1:
+            self._on_log(
+                "ℹ️ 智能切片一次处理一个视频，已使用第一个: "
+                f"{os.path.basename(video)}"
+            )
+        out_dir = self.input_out_dir.text().strip()
+        if not out_dir:
+            return self._on_log("⚠️ 请选择输出目录")
+        try:
+            os.makedirs(out_dir, exist_ok=True)
+        except OSError as exc:
+            return self._on_log(f"⚠️ 输出目录不可写: {exc}")
+
+        self._save_search_params()
+        self.progress.setValue(0)
+        self.btn_start.setEnabled(False)
+        self.btn_fetch.setEnabled(False)
+        self.btn_stop.setEnabled(True)
+        self.btn_script.setEnabled(False)
+        self._semantic_thread = SemanticClipThread(
+            video,
+            self.input_query.text().strip(),
+            self._collect_angles(),
+            out_dir,
+            min_dur=40.0,
+            max_dur=180.0,
+            top_k=3,
+            output_w=1080,
+            output_h=1920,
+            parent=self,
+        )
+        self._semantic_thread.log_msg.connect(self._on_log)
+        self._semantic_thread.progress_changed.connect(self._on_progress)
+        self._semantic_thread.results_ready.connect(self._on_semantic_results)
+        self._semantic_thread.error.connect(self._on_semantic_error)
+        self._semantic_thread.finished.connect(self._on_semantic_finished)
+        self._on_log(
+            f"▶️ 开始智能切片: {os.path.basename(video)}"
+            "（最多 3 条 / 40-180 秒 / 竖屏双语字幕）"
+        )
+        self._semantic_thread.start()
+
+    def _on_semantic_results(self, cuts):
+        self.results_list.clear()
+        for cut in cuts:
+            angle = cut.angle_title or "无热点关联"
+            title = cut.viral_title_zh or cut.theme
+            text = (
+                f"{cut.theme} | {cut.start:.1f}-{cut.end:.1f}s | "
+                f"{angle} | {title}"
+            )
+            item = QListWidgetItem(text)
+            item.setData(Qt.UserRole, cut.clip_path)
+            item.setToolTip(render_social_copy(cut))
+            self.results_list.addItem(item)
+        if cuts:
+            self._on_log(f"✅ 智能切片完成，共 {len(cuts)} 条成片")
+        else:
+            self._on_log("ℹ️ 智能切片完成，未生成切片")
+
+    def _on_semantic_error(self, msg):
+        self._on_log(f"❌ 智能切片失败: {msg}")
+
+    def _on_semantic_finished(self):
+        self.btn_start.setEnabled(True)
+        self.btn_fetch.setEnabled(True)
+        self.btn_stop.setEnabled(False)
+        self.btn_script.setEnabled(True)
+        if self.progress.value() < 100:
+            self.progress.setValue(0)
+        self._maybe_finish_close()
 
     def suggest_script(self):
         """针对当前选中的单个视频生成建议脚本。"""
@@ -574,6 +696,9 @@ class SmartSearchDialog(QDialog):
         if (self._trend_thread is not None
                 and self._trend_thread.isRunning()):
             return self._on_log("⚠️ 热点抓取仍在进行，请稍候")
+        if (self._semantic_thread is not None
+                and self._semantic_thread.isRunning()):
+            return self._on_log("⚠️ 智能切片仍在进行，请稍候")
 
         scope = self._collect_scope()
         if not scope:
@@ -708,6 +833,9 @@ class SmartSearchDialog(QDialog):
         if (self._script_thread is not None
                 and self._script_thread.isRunning()):
             return
+        if (self._semantic_thread is not None
+                and self._semantic_thread.isRunning()):
+            return
         self._close_when_finished = False
         self._save_search_params()
         self.accept()
@@ -760,6 +888,14 @@ class SmartSearchDialog(QDialog):
             event.ignore()
             self._close_when_finished = True
             self._on_log("⏳ 建议脚本生成中，完成后自动关闭...")
+            return
+
+        if (self._semantic_thread is not None
+                and self._semantic_thread.isRunning()):
+            event.ignore()
+            self._semantic_thread.stop()
+            self._close_when_finished = True
+            self._on_log("⏳ 智能切片生成中，完成后自动关闭...")
             return
 
         event.accept()

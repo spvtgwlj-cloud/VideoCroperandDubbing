@@ -287,6 +287,87 @@ def test_start_search_passes_ui_params(app, monkeypatch, tmp_path):
     dialog.close()
 
 
+def test_semantic_mode_starts_thread_with_fixed_params(app, monkeypatch, tmp_path):
+    from ui import smart_search_dialog as ssd
+    from ui.smart_search_dialog import SmartSearchDialog
+
+    class _Signal:
+        def connect(self, *args, **kwargs):
+            pass
+
+    captured = {}
+
+    class _FakeSemanticThread:
+        def __init__(self, *args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            for name in ("log_msg", "progress_changed", "results_ready",
+                         "error", "finished"):
+                setattr(self, name, _Signal())
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def isRunning(self):
+            return False
+
+    monkeypatch.setattr(ssd, "SemanticClipThread", _FakeSemanticThread)
+    video = tmp_path / "a.mp4"
+    video.write_bytes(b"x")
+
+    dialog = SmartSearchDialog()
+    dialog.mode_combo.setCurrentIndex(1)
+    dialog.input_single.setText(str(video))
+    dialog.input_query.setText("AI")
+    dialog.input_out_dir.setText(str(tmp_path / "out"))
+
+    dialog.start_search()
+
+    assert captured["args"][0] == str(video)
+    assert captured["kwargs"]["min_dur"] == 40.0
+    assert captured["kwargs"]["max_dur"] == 180.0
+    assert captured["kwargs"]["top_k"] == 3
+    assert captured["kwargs"]["output_w"] == 1080
+    assert captured["kwargs"]["output_h"] == 1920
+    dialog.close()
+
+
+def test_semantic_mode_disables_search_only_params(app):
+    from ui.smart_search_dialog import SmartSearchDialog
+
+    dialog = SmartSearchDialog()
+    dialog.mode_combo.setCurrentIndex(1)
+    assert dialog.btn_start.text() == "开始智能切片"
+    assert dialog.spin_min_dur.isEnabled() is False
+    assert dialog.chk_deep.isEnabled() is False
+
+    dialog.mode_combo.setCurrentIndex(0)
+    assert dialog.btn_start.text() == "开始检索"
+    assert dialog.spin_min_dur.isEnabled() is True
+    dialog.close()
+
+
+def test_semantic_results_render_theme_and_angle(app):
+    from core.semantic_clip import CutPlan
+    from ui.smart_search_dialog import SmartSearchDialog
+
+    dialog = SmartSearchDialog()
+    dialog._on_semantic_results([
+        CutPlan(
+            5.0, 45.0, "AI 与农业", angle_title="AI 热点",
+            clip_path="/tmp/demo.mp4", viral_title_zh="中文标题",
+        ),
+    ])
+    text = dialog.results_list.item(0).text()
+    assert "AI 与农业" in text
+    assert "AI 热点" in text
+    assert "中文标题" in text
+    dialog.close()
+
+
 def test_start_search_explains_running_trend_fetch(app, tmp_path):
     from ui.smart_search_dialog import SmartSearchDialog
 

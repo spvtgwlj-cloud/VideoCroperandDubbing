@@ -64,7 +64,7 @@
 ### 测试
 
 ```bash
-python3 -m pytest tests/ -q    # 185 passed, 1 skipped（截至 2026-11-06）
+python3 -m pytest tests/ -q    # 202 passed, 1 skipped（截至 2026-11-06）
 ```
 
 新增 66 个测试，覆盖关键词匹配/预筛、片段合并、转写缓存、LLM 批量打分与熔断、导出/报告/去重台账、热点抓取/归纳、编排线程、功能开关、UI 线程保护、进度反馈、空结果兜底与导出兼容性。
@@ -202,15 +202,59 @@ python3 -m pytest tests/ -q    # 185 passed, 1 skipped（截至 2026-11-06）
 
 - `v4.4.0-checkpoint-20261106-params`（本次提交，参数持久化与默认值统一）
 
+### 智能切片模式（2026-11-06）
+
+**目标**
+
+- 在智能检索窗口新增独立「智能切片」模式：通读整段视频，按话题完整性切出最多 3 个 40–180 秒片段，结合 HN/V2EX 热点，直接输出竖屏成片 + 双语文案。
+
+**新增文件**
+
+- `core/semantic_clip.py`：切片数据模型、LLM prompt、JSON 校验、时间/重叠过滤、双语文案。
+- `core/semantic_clip_thread.py`：转写缓存、热点抓取、LLM 切片、双语翻译、切片导出、报告。
+- `core/clip_renderer.py`：InsightFace 竖屏运镜 + 中英双语硬字幕 + 音视频合成。
+
+**行为**
+
+- UI 模式切换：智能检索 / 智能切片；切片模式固定最多 3 条、40–180 秒、1080×1920、30fps。
+- 热点可选：允许 `angle_index=-1`，界面显示「无热点关联」，不硬蹭。
+- 双语字幕：中文主字幕（黄色、正常字号），英文副字幕在主字幕下方、灰色、字号更小。
+- 每个切片输出 mp4 + `_文案.txt`（中英标题/描述/标签），总报告 `semantic_clips.json`。
+- LLM 切片分析流式 + 超时后缩短转写重试；双语翻译流式 + 120 秒 + 每批 5 句。
+- 渲染进度只在百分比变化时上报，避免刷屏。
+
+**真实验证（春天的信号）**
+
+- 生成 2 条成片：
+  - 48.3–112.4s（64.1s）：从盲管到5G智慧农田。
+  - 2.0–47.2s（45.2s）：天山脚下棉花春耕。
+- 均为 1080×1920 / 30fps / 带音轨；InsightFace 运镜正常。
+- 两条均无合适热点关联，模型明确说明不硬蹭。
+- 首次翻译有 2 个批次超时；改为流式 + 120 秒 + 每批 5 句后，46/46 句均生成中文和英文。
+- 修正版重新渲染在收尾时仍在运行，产物目录 `AI_智能切片_真实验证_20261106_171842_修正版/`。
+
+**测试**
+
+- 新增 17 个测试：切片解析/校验/合并/文案、双语字幕下方渲染、竖屏成片渲染、切片线程、UI 模式与结果。
+- 全量 `202 passed, 1 skipped`。
+
+**安全提醒**
+
+- 参考文件 `VideoClipperandCropper_LLMBased_FacePro_V2PR_副本.py` 含硬编码 API Key，未提交；建议删除并轮换 Key。
+
+**回退检查点**
+
+- `v4.4.0-checkpoint-20261106-semantic-clip`（本次提交）
+
 ### 分支与回退
 
 - 基线：`abff400` / 标签 `v4.3.4-baseline`
 - 开发分支：`feature/v4.4.0-smart-search`（已推送）
-- 远程分支：`origin/feature/v4.4.0-smart-search` @ `ccfa9f2`
+- 远程分支：`origin/feature/v4.4.0-smart-search`（持续更新）
 - PR：https://github.com/spvtgwlj-cloud/VideoCroperandDubbing/pull/1
   - Base：`main`；Head：`feature/v4.4.0-smart-search`；状态：OPEN
-  - 范围：以 v4.3.3 `main` 为基，包含 v4.3.4 基线与 v4.4.0 智能检索增强
-  - 规模：43 files, +8593 / -1365
+  - 范围：以 v4.3.3 `main` 为基，包含 v4.3.4 基线与 v4.4.0 智能检索/建议脚本/智能切片
+  - 规模：以 PR 页面为准（持续追加）
 - 远程 main：2026-11-06 已从空 `init`（`39e333f`）力推为本地 `1436f25`（v4.3.3），与功能分支共享历史
 - 回退检查点：`v4.4.0-checkpoint-20261106` @ `7c1251a`（本地与远程）
   - 查看/切回：`git checkout v4.4.0-checkpoint-20261106`
@@ -218,6 +262,9 @@ python3 -m pytest tests/ -q    # 185 passed, 1 skipped（截至 2026-11-06）
 - 参数持久化检查点：`v4.4.0-checkpoint-20261106-params`（本次提交）
   - 查看/切回：`git checkout v4.4.0-checkpoint-20261106-params`
   - 让分支强制回到该检查点：`git reset --hard v4.4.0-checkpoint-20261106-params`
+- 智能切片检查点：`v4.4.0-checkpoint-20261106-semantic-clip`（本次提交）
+  - 查看/切回：`git checkout v4.4.0-checkpoint-20261106-semantic-clip`
+  - 让分支强制回到该检查点：`git reset --hard v4.4.0-checkpoint-20261106-semantic-clip`
 - 运行时关闭：`AI_VIDEO_SMART_SEARCH=0`
 - 代码回退：`git checkout v4.3.4-baseline`
 
@@ -248,7 +295,7 @@ core/
 ├── search_thread.py                    — 检索后台线程（新增）
 ├── script_suggest.py                   — 建议脚本 prompt/解析/渲染（新增）
 └── script_thread.py                    — 建议脚本编排线程（新增）
-tests/                                  — 186 个测试（65 基线 + 121 新增；185 passed + 1 skipped）
+tests/                                  — 203 个测试（65 基线 + 138 新增；202 passed + 1 skipped）
 AI视频配音Pro.spec / build.sh           — 打包
 ```
 
@@ -257,7 +304,7 @@ AI视频配音Pro.spec / build.sh           — 打包
 ## 测试
 
 ```bash
-python3 -m pytest tests/ -v    # 185 passed + 1 skipped（186 tests）
+python3 -m pytest tests/ -v    # 202 passed + 1 skipped（203 tests）
 ```
 
 ## 打包
@@ -276,7 +323,7 @@ bash build.sh mac     # → dist/AI视频配音Pro.app (~1.1GB)
 | v4.3.2 | 06-26 | AI 管线复用 + H.265 tag 修复 + 配置保存修复 |
 | v4.3.3 | 06-29 | 启动画面（Splash Screen）— 纯代码绘制，零资源依赖 |
 | v4.3.4 | 07-16 | LLM API 供应商配置化 + 平台「自定义」+ UI 修复 |
-| **v4.4.0** | **11-02 / 11-03 / 11-04 / 11-06** | **智能视频检索 — 热点/批量/缓存/独立窗口；11-03 增加热榜关联优化、空结果诊断与建议脚本；11-04 修复自动归纳竞态、建议脚本改为流式并缩短超时重试；11-06 推送功能分支、创建 PR #1 与回退检查点、检索参数持久化与默认值统一** |
+| **v4.4.0** | **11-02 / 11-03 / 11-04 / 11-06** | **智能视频检索 — 热点/批量/缓存/独立窗口；11-03 增加热榜关联优化、空结果诊断与建议脚本；11-04 修复自动归纳竞态、建议脚本改为流式并缩短超时重试；11-06 推送功能分支、创建 PR #1 与回退检查点、检索参数持久化与默认值统一、智能切片（整段语义切片 + 竖屏双语成片）** |
 | **v4.5.0** | **11-02** | **纯本地视觉内容检索（设计阶段）** |
 
 ---
