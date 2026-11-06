@@ -243,7 +243,7 @@ python3 -m pytest tests/ -q    # 202 passed, 1 skipped（截至 2026-11-06）
 
 **安全提醒**
 
-- 参考文件 `VideoClipperandCropper_LLMBased_FacePro_V2PR_副本.py` 含硬编码 API Key，未提交；建议删除并轮换 Key。
+- 参考文件 `VideoClipperandCropper_LLMBased_FacePro_V2PR_副本.py` 含硬编码 API Key，未提交，已于 2026-11-06 从工作目录删除；仍建议轮换该 Key。
 
 **回退检查点**
 
