@@ -50,6 +50,7 @@ def _make_mock_thread(**overrides):
     mock.accompaniment_path = None
     mock.dashscope_api_key = "test-key"
     mock.cosy_model = "cosyvoice-v2"
+    mock.llm_model = "qwen-max"
     mock.enable_edge_tts_first = False
     mock.edge_tts_voices = {}
 

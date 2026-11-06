@@ -11,11 +11,14 @@ from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QLabel, QPushButton, QComboBox, QLineEdit, QTextEdit,
     QGroupBox, QRadioButton, QButtonGroup, QSpinBox, QFileDialog, QGridLayout,
-    QCheckBox, QProgressBar, QSlider, QMessageBox, QScrollArea,
+    QCheckBox, QProgressBar, QSlider, QMessageBox, QScrollArea, QDialog,
 )
 from PyQt5.QtCore import Qt
 
-from core.config import PLATFORM_PRESETS, SUBTITLE_COLORS, EDGE_TTS_VOICES
+from core.config import (
+    PLATFORM_PRESETS, SUBTITLE_COLORS, EDGE_TTS_VOICES, ENABLE_SMART_SEARCH,
+)
+from core.llm_config import load_llm_config
 from core.process_thread import VideoProcessThread
 
 
@@ -57,12 +60,13 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(main_widget)
         main_layout = QHBoxLayout(main_widget)
         main_layout.setContentsMargins(15, 15, 15, 15)
+        main_layout.setSpacing(16)
 
         # ---------- 左：预览 + 波形 + 日志 ----------
         self.left_panel = QWidget()
         left_layout = QVBoxLayout(self.left_panel)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(8)
+        left_layout.setContentsMargins(0, 0, 8, 0)
+        left_layout.setSpacing(6)
 
         # ---- 预览区（视频爆点控件 + 视频预览） ----
         preview_row = QHBoxLayout()
@@ -308,7 +312,7 @@ class MainWindow(QMainWindow):
         config_layout.addWidget(QLabel("输出平台:"), 0, 0)
         # 平台多选横排（直接展示，用户勾选即生效）
         platform_row = QHBoxLayout()
-        platform_row.setSpacing(36)  # 3 个汉字宽度
+        platform_row.setSpacing(20)  # 平台复选框间距
         self.platform_checks = {}
         for pname in list(PLATFORM_PRESETS.keys()):
             if pname == "手动配置":
@@ -319,6 +323,11 @@ class MainWindow(QMainWindow):
             chk.toggled.connect(lambda checked, p=pname: self._on_platform_toggled(p, checked))
             platform_row.addWidget(chk)
             self.platform_checks[pname] = chk
+        # 「自定义」独立选项（不来自 PLATFORM_PRESETS，不参与多平台输出）
+        self.chk_custom = QCheckBox("自定义")
+        self.chk_custom.setStyleSheet("color: #C0C0E0; font-size: 11px;")
+        self.chk_custom.toggled.connect(lambda checked: self._on_platform_toggled("自定义", checked))
+        platform_row.addWidget(self.chk_custom)
         platform_row.addStretch()
         config_layout.addLayout(platform_row, 0, 1, 1, 3)
 
@@ -344,7 +353,7 @@ class MainWindow(QMainWindow):
         config_layout.addWidget(self.lbl_batch_count, 2, 3)
 
         # ---- Row 3: 视频裁剪 ----
-        config_layout.addWidget(QLabel("视频裁剪 (0=不裁剪):"), 3, 0)
+        config_layout.addWidget(QLabel("视频裁剪:"), 3, 0)
 
         trim_start_layout = QHBoxLayout()
         trim_start_layout.setSpacing(3)
@@ -361,7 +370,7 @@ class MainWindow(QMainWindow):
         trim_end_layout.addWidget(QLabel("到"))
         self.trim_end = QSpinBox()
         self.trim_end.setRange(0, 99999)
-        self.trim_end.setSuffix(" 秒")
+        self.trim_end.setSuffix(" 秒 (0=不裁剪)")
         self.trim_end.setToolTip("裁剪结束位置（秒），0 = 到视频结尾结束")
         trim_end_layout.addWidget(self.trim_end)
         config_layout.addLayout(trim_end_layout, 3, 2, 1, 2)
@@ -499,6 +508,7 @@ class MainWindow(QMainWindow):
         self.sub_src_group.addButton(self.chk_sub_manual)
         self.sub_src_group.setExclusive(True)
         sub_src_layout = QHBoxLayout()
+        sub_src_layout.setContentsMargins(0, 0, 0, 0)
         sub_src_layout.setSpacing(36)
         sub_src_layout.addWidget(self.chk_sub_auto)
         sub_src_layout.addWidget(self.chk_sub_manual)
@@ -673,6 +683,13 @@ class MainWindow(QMainWindow):
         self.btn_load_config.clicked.connect(self.load_config)
         config_btn_layout.addWidget(self.btn_save_config)
         config_btn_layout.addWidget(self.btn_load_config)
+        self.btn_api_config = QPushButton("🔑 AI 大模型设置")
+        self.btn_api_config.clicked.connect(self.open_api_config)
+        config_btn_layout.addWidget(self.btn_api_config)
+        self.btn_smart_search = QPushButton("🔍 智能检索")
+        self.btn_smart_search.clicked.connect(self.open_smart_search)
+        self.btn_smart_search.setVisible(ENABLE_SMART_SEARCH)
+        config_btn_layout.addWidget(self.btn_smart_search)
         config_btn_layout.addStretch()
         config_layout.addLayout(config_btn_layout, 21, 0, 1, 4)
 
@@ -695,6 +712,13 @@ class MainWindow(QMainWindow):
     def _on_platform_toggled(self, pname, checked):
         """平台勾选时自动应用对应预设参数"""
         if checked:
+            # 「自定义」模式：解锁全部参数，不强制任何预设值
+            if pname == "自定义":
+                self.res_w_spin.setEnabled(True)
+                self.res_h_spin.setEnabled(True)
+                self.chk_lock_aspect.setEnabled(True)
+                return
+
             preset = PLATFORM_PRESETS.get(pname, {})
             is_v = preset.get("is_vertical")
             if is_v is True:
@@ -993,6 +1017,32 @@ class MainWindow(QMainWindow):
         painter.end()
         self.waveform_label.setPixmap(pixmap)
 
+    def open_api_config(self):
+        """打开 API 配置对话框"""
+        from ui.api_config_dialog import ApiConfigDialog
+        config = load_llm_config()
+        dialog = ApiConfigDialog(config, self)
+        if dialog.exec_() == QDialog.Accepted:
+            self.log("✅ API 配置已更新")
+
+    def open_smart_search(self):
+        """打开智能检索对话框（懒加载，失败不影响主程序）"""
+        if not ENABLE_SMART_SEARCH:
+            return self.log("ℹ️ 智能检索功能已关闭")
+        if self.thread is not None and self.thread.isRunning():
+            return self.log("⚠️ 配音处理中，请完成后再使用智能检索")
+        try:
+            from ui.smart_search_dialog import SmartSearchDialog
+            dialog = SmartSearchDialog(self)
+            dialog.prefill_scope(
+                single_path=self.input_path.text().strip(),
+                batch_folder=self.batch_folder_path,
+                use_batch=self.chk_batch.isChecked(),
+            )
+            dialog.exec_()
+        except Exception as e:
+            self.log(f"⚠️ 智能检索不可用: {e}")
+
     # -------- 开始处理 --------
     def start_processing(self):
         # 收集输入源
@@ -1063,6 +1113,11 @@ class MainWindow(QMainWindow):
         if self.chk_sub_manual.isChecked():
             subtitle_file_path = self.subtitle_file_path.text().strip()
 
+        # 加载 API 配置
+        api_cfg = load_llm_config()
+        trans = api_cfg.get("translation", {})
+        vc = api_cfg.get("voice_clone", {})
+
         self.thread = VideoProcessThread(
             input_source=input_src,
             is_vertical=self.chk_vertical.isChecked(),
@@ -1095,6 +1150,16 @@ class MainWindow(QMainWindow):
             highlight_dur_sec=self.highlight_dur_spin.value(),
             chapters=self._collect_chapters(),
             multi_platforms=self._collect_multi_platforms(),
+            # ---- API 配置 ----
+            translation_api_key=trans.get("api_key", ""),
+            translation_base_url=trans.get("base_url", ""),
+            translation_model=trans.get("model", "qwen-max"),
+            tts_api_key=vc.get("tts_api_key", ""),
+            cosy_model=vc.get("cosy_model", "cosyvoice-v2"),
+            voice_clone_use_separate=vc.get("use_separate_llm", False),
+            voice_clone_api_key=vc.get("api_key", ""),
+            voice_clone_base_url=vc.get("base_url", ""),
+            voice_clone_model=vc.get("model", "qwen-max"),
         )
 
         self.thread.update_frame.connect(self.update_preview)
@@ -1208,6 +1273,7 @@ class MainWindow(QMainWindow):
             "chapters_enabled": self.chapter_group.isChecked(),
             "chapters": [{"start": r[0].value(), "title": r[1].text().strip()}
                          for r in self.chapter_rows],
+            "api_config": load_llm_config(),
         }
         file_path, _ = QFileDialog.getSaveFileName(self, "保存配置模板", "", "JSON 文件 (*.json)")
         if not file_path:
@@ -1230,6 +1296,13 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.log(f"❌ 加载配置失败: {e}")
             return
+
+        # 恢复 API 配置（如模板中包含）
+        api_cfg = config.get("api_config")
+        if api_cfg:
+            from core.llm_config import save_llm_config
+            save_llm_config(api_cfg)
+            self.log("📂 API 配置已从模板恢复")
 
         # 恢复所有 UI 控件
         def _restore_combo(widget, key):
