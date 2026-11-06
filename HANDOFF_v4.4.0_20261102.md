@@ -64,7 +64,7 @@
 ### 测试
 
 ```bash
-python3 -m pytest tests/ -q    # 176 passed, 1 skipped（截至 2026-11-04）
+python3 -m pytest tests/ -q    # 185 passed, 1 skipped（截至 2026-11-06）
 ```
 
 新增 66 个测试，覆盖关键词匹配/预筛、片段合并、转写缓存、LLM 批量打分与熔断、导出/报告/去重台账、热点抓取/归纳、编排线程、功能开关、UI 线程保护、进度反馈、空结果兜底与导出兼容性。
@@ -173,6 +173,35 @@ python3 -m pytest tests/ -q    # 176 passed, 1 skipped（截至 2026-11-04）
 - 旧的非流式 120 秒超时下该请求会失败；流式下总耗时 136.6s 仍能成功。
 - 单元测试新增 2 个（超时后缩短 prompt、缩短后仍超时的错误提示），全量 `176 passed, 1 skipped`。
 
+### 检索参数持久化与默认值统一（2026-11-06）
+
+**参数持久化**
+
+- 新增 `core/search_params.py`，保存到 `~/.ai_video_dubbing_pro/smart_search/search_params.json`。
+- 持久化 `min_dur` / `max_dur` / `merge_gap` / `top_k` / `deep_mode` / `force_export` / `allow_relaxed_fallback`。
+- 输出目录按次生成（带时间戳），**不持久化**，避免多次检索互相覆盖。
+- 打开窗口时回填；点击「开始检索」「建议脚本」或关闭窗口时保存。
+- 文件缺失、JSON 损坏、字段类型错误或越界时回退默认值；`min_dur >= max_dur` 时重置为默认的 30 / 120。
+- 保存失败只记录日志，不阻塞检索。
+
+**参数默认值**
+
+- 最短片段 **30 秒**、每视频 **3 条**。
+- 深度模式默认 **开启**（`deep_mode=True`）。
+- 强制重新导出、弱相关兜底默认关闭。
+- 参数页控件、`SmartSearchThread` 默认值与 `DEFAULT_SEARCH_PARAMS` 共用同一份定义。
+- 检索日志打印本次实际参数：最短 / 最长 / 合并间隔 / 每视频条数。
+- 增加 `min_dur < max_dur` 校验。
+
+**测试**
+
+- 新增 9 个测试：参数文件缺失/损坏/越界/类型错误、保存读取往返、UI 回填、关闭后保留、页面参数传入线程。
+- 全量 `185 passed, 1 skipped`。
+
+**回退检查点**
+
+- `v4.4.0-checkpoint-20261106-params`（本次提交，参数持久化与默认值统一）
+
 ### 分支与回退
 
 - 基线：`abff400` / 标签 `v4.3.4-baseline`
@@ -186,6 +215,9 @@ python3 -m pytest tests/ -q    # 176 passed, 1 skipped（截至 2026-11-04）
 - 回退检查点：`v4.4.0-checkpoint-20261106` @ `7c1251a`（本地与远程）
   - 查看/切回：`git checkout v4.4.0-checkpoint-20261106`
   - 让分支强制回到检查点（会丢弃之后的提交）：`git reset --hard v4.4.0-checkpoint-20261106`
+- 参数持久化检查点：`v4.4.0-checkpoint-20261106-params`（本次提交）
+  - 查看/切回：`git checkout v4.4.0-checkpoint-20261106-params`
+  - 让分支强制回到该检查点：`git reset --hard v4.4.0-checkpoint-20261106-params`
 - 运行时关闭：`AI_VIDEO_SMART_SEARCH=0`
 - 代码回退：`git checkout v4.3.4-baseline`
 
@@ -216,7 +248,7 @@ core/
 ├── search_thread.py                    — 检索后台线程（新增）
 ├── script_suggest.py                   — 建议脚本 prompt/解析/渲染（新增）
 └── script_thread.py                    — 建议脚本编排线程（新增）
-tests/                                  — 177 个测试（65 基线 + 112 新增；176 passed + 1 skipped）
+tests/                                  — 186 个测试（65 基线 + 121 新增；185 passed + 1 skipped）
 AI视频配音Pro.spec / build.sh           — 打包
 ```
 
@@ -225,7 +257,7 @@ AI视频配音Pro.spec / build.sh           — 打包
 ## 测试
 
 ```bash
-python3 -m pytest tests/ -v    # 176 passed + 1 skipped（177 tests）
+python3 -m pytest tests/ -v    # 185 passed + 1 skipped（186 tests）
 ```
 
 ## 打包
@@ -244,7 +276,7 @@ bash build.sh mac     # → dist/AI视频配音Pro.app (~1.1GB)
 | v4.3.2 | 06-26 | AI 管线复用 + H.265 tag 修复 + 配置保存修复 |
 | v4.3.3 | 06-29 | 启动画面（Splash Screen）— 纯代码绘制，零资源依赖 |
 | v4.3.4 | 07-16 | LLM API 供应商配置化 + 平台「自定义」+ UI 修复 |
-| **v4.4.0** | **11-02 / 11-03 / 11-04 / 11-06** | **智能视频检索 — 热点/批量/缓存/独立窗口；11-03 增加热榜关联优化、空结果诊断与建议脚本；11-04 修复自动归纳竞态、建议脚本改为流式并缩短超时重试；11-06 推送功能分支、创建 PR #1 与回退检查点 `v4.4.0-checkpoint-20261106`** |
+| **v4.4.0** | **11-02 / 11-03 / 11-04 / 11-06** | **智能视频检索 — 热点/批量/缓存/独立窗口；11-03 增加热榜关联优化、空结果诊断与建议脚本；11-04 修复自动归纳竞态、建议脚本改为流式并缩短超时重试；11-06 推送功能分支、创建 PR #1 与回退检查点、检索参数持久化与默认值统一** |
 | **v4.5.0** | **11-02** | **纯本地视觉内容检索（设计阶段）** |
 
 ---

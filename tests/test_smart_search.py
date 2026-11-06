@@ -107,7 +107,7 @@ def test_merge_hits_merges_nearby_and_splits_on_gap():
         {"start": 40.0, "end": 42.0, "text": "价格三"},
     ]
     hits = [Hit(0, 0.9), Hit(1, 0.8), Hit(2, 0.7)]
-    clips = merge_hits(hits, segments, duration=60.0, top_k=10)
+    clips = merge_hits(hits, segments, duration=60.0, min_dur=3.0, top_k=10)
     assert len(clips) == 2
     assert clips[0].start == 9.5 and clips[0].end == 15.5
     assert clips[0].score == pytest.approx(0.85)
@@ -127,7 +127,9 @@ def test_merge_hits_splits_long_clip():
         for i in range(0, 60)
     ]
     hits = [Hit(i, 0.8) for i in range(60)]
-    clips = merge_hits(hits, segments, duration=60.0, max_dur=30.0, top_k=100)
+    clips = merge_hits(
+        hits, segments, duration=60.0, min_dur=3.0, max_dur=30.0, top_k=100,
+    )
     assert len(clips) > 1
     assert all(c.end - c.start <= 30.0 for c in clips)
 
@@ -138,7 +140,7 @@ def test_merge_hits_top_k_and_duplicate_index():
         {"start": 20.0, "end": 30.0, "text": "低"},
     ]
     hits = [Hit(0, 0.9), Hit(0, 0.5), Hit(1, 0.4)]
-    clips = merge_hits(hits, segments, duration=60.0, top_k=1)
+    clips = merge_hits(hits, segments, duration=60.0, min_dur=3.0, top_k=1)
     assert len(clips) == 1
     assert clips[0].score == pytest.approx(0.9)
 
@@ -162,7 +164,9 @@ def test_heat_bonus_breaks_content_ties():
     ]
     cold = Hit(0, 0.8)
     hot = Hit(1, 0.8, heat=1.0, heat_raw=100, heat_source="hn")
-    clips = merge_hits([cold, hot], segments, duration=60.0, top_k=10)
+    clips = merge_hits(
+        [cold, hot], segments, duration=60.0, min_dur=3.0, top_k=10,
+    )
     assert clips[0].matched_sentences == ["热"]
     assert clips[0].score == pytest.approx(0.85)
     assert clips[0].content_score == pytest.approx(0.8)
@@ -176,7 +180,9 @@ def test_heat_bonus_cannot_override_content_gap():
     ]
     higher = Hit(0, 0.9)
     hotter = Hit(1, 0.8, heat=1.0, heat_raw=100, heat_source="hn")
-    clips = merge_hits([higher, hotter], segments, duration=60.0, top_k=10)
+    clips = merge_hits(
+        [higher, hotter], segments, duration=60.0, min_dur=3.0, top_k=10,
+    )
     assert clips[0].matched_sentences == ["高内容"]
 
 

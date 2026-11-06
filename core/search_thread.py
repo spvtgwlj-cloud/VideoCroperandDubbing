@@ -28,8 +28,8 @@ class SmartSearchThread(QThread):
     finished = pyqtSignal()
 
     def __init__(self, scope_files, query, angles, codec, bitrate_mbps,
-                 out_dir, *, min_dur=3.0, max_dur=120.0, merge_gap=2.0,
-                 top_k=10, pad_before=0.5, pad_after=0.5, deep_mode=False,
+                 out_dir, *, min_dur=30.0, max_dur=120.0, merge_gap=2.0,
+                 top_k=3, pad_before=0.5, pad_after=0.5, deep_mode=False,
                  force_export=False, allow_relaxed_fallback=False,
                  batch_size=10, parent=None):
         super().__init__(parent)

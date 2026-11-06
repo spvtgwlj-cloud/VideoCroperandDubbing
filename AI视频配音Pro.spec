@@ -56,6 +56,7 @@ hidden_imports = [
     "core.search_types", "core.smart_search", "core.trend_sources",
     "core.trend_thread", "core.search_thread", "ui.smart_search_dialog",
     "core.script_suggest", "core.script_thread", "ui.script_dialog",
+    "core.search_params",
     # 其他
     "numpy", "numpy.core", "numpy.linalg",
     "scipy",

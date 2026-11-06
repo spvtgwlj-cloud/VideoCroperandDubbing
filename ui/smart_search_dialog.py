@@ -15,6 +15,9 @@ from PyQt5.QtWidgets import (
 
 from core.script_suggest import render_script_markdown
 from core.script_thread import ScriptSuggestionThread
+from core.search_params import (
+    DEFAULT_SEARCH_PARAMS, load_search_params, save_search_params,
+)
 from core.search_thread import SmartSearchThread
 from core.search_types import TrendAngle
 from core.smart_search import export_report
@@ -47,6 +50,7 @@ class SmartSearchDialog(QDialog):
         self._init_ui()
         self._apply_style()
         self._set_default_output_dir()
+        self._apply_search_params(load_search_params())
 
     # ----------------------------------------------------------------
     # UI 构建
@@ -182,25 +186,32 @@ class SmartSearchDialog(QDialog):
 
         self.spin_min_dur = QSpinBox()
         self.spin_min_dur.setRange(1, 600)
-        self.spin_min_dur.setValue(3)
+        self.spin_min_dur.setValue(DEFAULT_SEARCH_PARAMS["min_dur"])
         self.spin_min_dur.setSuffix(" 秒")
         self.spin_max_dur = QSpinBox()
         self.spin_max_dur.setRange(5, 3600)
-        self.spin_max_dur.setValue(120)
+        self.spin_max_dur.setValue(DEFAULT_SEARCH_PARAMS["max_dur"])
         self.spin_max_dur.setSuffix(" 秒")
         self.spin_merge_gap = QDoubleSpinBox()
         self.spin_merge_gap.setRange(0.0, 60.0)
         self.spin_merge_gap.setDecimals(1)
         self.spin_merge_gap.setSingleStep(0.5)
-        self.spin_merge_gap.setValue(2.0)
+        self.spin_merge_gap.setValue(DEFAULT_SEARCH_PARAMS["merge_gap"])
         self.spin_merge_gap.setSuffix(" 秒")
         self.spin_top_k = QSpinBox()
         self.spin_top_k.setRange(1, 100)
-        self.spin_top_k.setValue(10)
+        self.spin_top_k.setValue(DEFAULT_SEARCH_PARAMS["top_k"])
         self.spin_top_k.setSuffix(" 条/视频")
         self.chk_deep = QCheckBox("深度模式（全部句子送 LLM，更慢更贵）")
+        self.chk_deep.setChecked(DEFAULT_SEARCH_PARAMS["deep_mode"])
         self.chk_force_export = QCheckBox("强制重新导出（忽略已导出台账）")
+        self.chk_force_export.setChecked(
+            DEFAULT_SEARCH_PARAMS["force_export"],
+        )
         self.chk_relaxed = QCheckBox("无强匹配时输出弱相关片段（需人工复核）")
+        self.chk_relaxed.setChecked(
+            DEFAULT_SEARCH_PARAMS["allow_relaxed_fallback"],
+        )
 
         form.addRow("最短片段:", self.spin_min_dur)
         form.addRow("最长片段:", self.spin_max_dur)
@@ -423,6 +434,35 @@ class SmartSearchDialog(QDialog):
             ))
         return angles
 
+    def _apply_search_params(self, params: dict) -> None:
+        """把持久化参数应用到参数页控件。"""
+        self.spin_min_dur.setValue(params["min_dur"])
+        self.spin_max_dur.setValue(params["max_dur"])
+        self.spin_merge_gap.setValue(params["merge_gap"])
+        self.spin_top_k.setValue(params["top_k"])
+        self.chk_deep.setChecked(params["deep_mode"])
+        self.chk_force_export.setChecked(params["force_export"])
+        self.chk_relaxed.setChecked(params["allow_relaxed_fallback"])
+
+    def _collect_search_params(self) -> dict:
+        """收集参数页当前值；输出目录按次生成，不持久化。"""
+        return {
+            "min_dur": self.spin_min_dur.value(),
+            "max_dur": self.spin_max_dur.value(),
+            "merge_gap": self.spin_merge_gap.value(),
+            "top_k": self.spin_top_k.value(),
+            "deep_mode": self.chk_deep.isChecked(),
+            "force_export": self.chk_force_export.isChecked(),
+            "allow_relaxed_fallback": self.chk_relaxed.isChecked(),
+        }
+
+    def _save_search_params(self) -> None:
+        """保存参数页当前值；失败只记录日志，不阻塞检索。"""
+        try:
+            save_search_params(self._collect_search_params())
+        except OSError as exc:
+            self._on_log(f"⚠️ 参数保存失败: {exc}")
+
     def _set_item_checkable(self, item, enabled):
         """自动模式下隐藏热点复选框，手动模式才允许勾选。"""
         flags = item.flags()
@@ -479,6 +519,14 @@ class SmartSearchDialog(QDialog):
         except OSError as exc:
             return self._on_log(f"⚠️ 输出目录不可写: {exc}")
 
+        min_dur = self.spin_min_dur.value()
+        max_dur = self.spin_max_dur.value()
+        merge_gap = self.spin_merge_gap.value()
+        top_k = self.spin_top_k.value()
+        if min_dur >= max_dur:
+            return self._on_log("⚠️ 最短片段必须小于最长片段")
+        self._save_search_params()
+
         self._clips = []
         self.results_list.clear()
         self.progress.setValue(0)
@@ -490,10 +538,10 @@ class SmartSearchDialog(QDialog):
         self._thread = SmartSearchThread(
             scope, query, angles,
             DEFAULT_CODEC, DEFAULT_BITRATE_MBPS, out_dir,
-            min_dur=self.spin_min_dur.value(),
-            max_dur=self.spin_max_dur.value(),
-            merge_gap=self.spin_merge_gap.value(),
-            top_k=self.spin_top_k.value(),
+            min_dur=min_dur,
+            max_dur=max_dur,
+            merge_gap=merge_gap,
+            top_k=top_k,
             deep_mode=self.chk_deep.isChecked(),
             force_export=self.chk_force_export.isChecked(),
             allow_relaxed_fallback=self.chk_relaxed.isChecked(),
@@ -506,7 +554,9 @@ class SmartSearchDialog(QDialog):
         self._thread.finished.connect(self._on_finished)
         self._on_log(
             f"▶️ 开始检索 {len(scope)} 个视频（{DEFAULT_CODEC} / "
-            f"{DEFAULT_BITRATE_MBPS} Mbps）"
+            f"{DEFAULT_BITRATE_MBPS} Mbps；最短 {min_dur}s / "
+            f"最长 {max_dur}s / 合并 {merge_gap:.1f}s / "
+            f"每视频 {top_k} 条）"
         )
         self._thread.start()
 
@@ -543,6 +593,7 @@ class SmartSearchDialog(QDialog):
         except OSError as exc:
             return self._on_log(f"⚠️ 输出目录不可写: {exc}")
 
+        self._save_search_params()
         self.progress.setValue(0)
         self.btn_start.setEnabled(False)
         self.btn_fetch.setEnabled(False)
@@ -658,6 +709,7 @@ class SmartSearchDialog(QDialog):
                 and self._script_thread.isRunning()):
             return
         self._close_when_finished = False
+        self._save_search_params()
         self.accept()
 
     def _on_result_double_clicked(self, item):
@@ -689,6 +741,7 @@ class SmartSearchDialog(QDialog):
     # ----------------------------------------------------------------
 
     def closeEvent(self, event):
+        self._save_search_params()
         if self._thread is not None and self._thread.isRunning():
             event.ignore()
             self._thread.stop()

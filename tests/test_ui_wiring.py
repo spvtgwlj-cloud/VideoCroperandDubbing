@@ -16,6 +16,15 @@ def app():
     return QApplication.instance() or QApplication([])
 
 
+@pytest.fixture(autouse=True)
+def _isolate_search_params(tmp_path, monkeypatch):
+    """避免 UI 测试读写真实用户目录下的参数文件。"""
+    monkeypatch.setattr(
+        "core.search_params.SEARCH_PARAMS_PATH",
+        str(tmp_path / "search_params.json"),
+    )
+
+
 class _FakeRunningThread:
     def __init__(self):
         self.stopped = False
@@ -168,6 +177,113 @@ def test_manual_mode_still_requires_checkbox(app):
 
     dialog.trend_list.item(0).setCheckState(Qt.Checked)
     assert [angle.title for angle in dialog._collect_angles()] == ["原始标题"]
+    dialog.close()
+
+
+def test_dialog_applies_persisted_params(app):
+    from core.search_params import save_search_params
+    from ui.smart_search_dialog import SmartSearchDialog
+
+    save_search_params({
+        "min_dur": 45,
+        "max_dur": 90,
+        "merge_gap": 1.5,
+        "top_k": 5,
+        "deep_mode": True,
+        "force_export": True,
+        "allow_relaxed_fallback": True,
+    })
+    dialog = SmartSearchDialog()
+
+    assert dialog.spin_min_dur.value() == 45
+    assert dialog.spin_max_dur.value() == 90
+    assert dialog.spin_merge_gap.value() == 1.5
+    assert dialog.spin_top_k.value() == 5
+    assert dialog.chk_deep.isChecked() is True
+    assert dialog.chk_force_export.isChecked() is True
+    assert dialog.chk_relaxed.isChecked() is True
+    dialog.close()
+
+
+def test_dialog_saves_params_on_close(app):
+    from core.search_params import load_search_params
+    from ui.smart_search_dialog import SmartSearchDialog
+
+    dialog = SmartSearchDialog()
+    dialog.spin_min_dur.setValue(45)
+    dialog.spin_top_k.setValue(5)
+    dialog.chk_deep.setChecked(True)
+    dialog.close()
+
+    saved = load_search_params()
+    assert saved["min_dur"] == 45
+    assert saved["top_k"] == 5
+    assert saved["deep_mode"] is True
+
+    reopened = SmartSearchDialog()
+    assert reopened.spin_min_dur.value() == 45
+    assert reopened.spin_top_k.value() == 5
+    assert reopened.chk_deep.isChecked() is True
+    reopened.close()
+
+
+def test_search_defaults_match_product_params(app):
+    from ui.smart_search_dialog import SmartSearchDialog
+
+    dialog = SmartSearchDialog()
+    assert dialog.spin_min_dur.value() == 30
+    assert dialog.spin_top_k.value() == 3
+    assert dialog.chk_deep.isChecked() is True
+    dialog.close()
+
+
+def test_start_search_passes_ui_params(app, monkeypatch, tmp_path):
+    from ui import smart_search_dialog as ssd
+    from ui.smart_search_dialog import SmartSearchDialog
+
+    class _Signal:
+        def connect(self, *args, **kwargs):
+            pass
+
+    captured = {}
+
+    class _FakeThread:
+        def __init__(self, *args, **kwargs):
+            captured.update(kwargs)
+            for name in ("log_msg", "progress_changed", "results_ready",
+                         "error", "finished"):
+                setattr(self, name, _Signal())
+
+        def start(self):
+            pass
+
+        def isRunning(self):
+            return False
+
+    monkeypatch.setattr(ssd, "SmartSearchThread", _FakeThread)
+    video = tmp_path / "a.mp4"
+    video.write_bytes(b"x")
+
+    dialog = SmartSearchDialog()
+    dialog.input_single.setText(str(video))
+    dialog.input_query.setText("价格")
+    dialog.input_out_dir.setText(str(tmp_path / "out"))
+    dialog.spin_min_dur.setValue(45)
+    dialog.spin_max_dur.setValue(90)
+    dialog.spin_merge_gap.setValue(1.5)
+    dialog.spin_top_k.setValue(5)
+
+    dialog.start_search()
+
+    assert captured["min_dur"] == 45
+    assert captured["max_dur"] == 90
+    assert captured["merge_gap"] == 1.5
+    assert captured["top_k"] == 5
+
+    from core.search_params import load_search_params
+    saved = load_search_params()
+    assert saved["min_dur"] == 45
+    assert saved["top_k"] == 5
     dialog.close()
 
 
